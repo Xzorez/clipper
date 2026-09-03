@@ -297,9 +297,10 @@ function EventSettings({
           <Row
             label="Desfase de las repeticiones de Rainbow Six"
             hint={
-              'Solo aplica cuando los eventos de Rainbow Six vienen de las repeticiones del ' +
-              'juego, sin Overwolf. Compensa la fase de preparacion: si los marcadores caen ' +
-              'antes de la accion, sube el valor. Es una constante, se calibra una sola vez.'
+              'Normalmente no hace falta tocarlo. Los eventos se situan tomando como ' +
+              'referencia el final de cada ronda, que no necesita calibracion. Este valor ' +
+              'solo entra en juego si esa referencia no es fiable, por ejemplo si las ' +
+              'repeticiones se han copiado o movido de sitio.'
             }
           >
             <input

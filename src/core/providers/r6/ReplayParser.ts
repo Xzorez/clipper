@@ -65,6 +65,13 @@ export interface ParsedReplay {
   events: ReplayEvent[];
   /** Mayor valor del reloj observado: el origen de la ronda. */
   maxTimeRemaining: number;
+  /**
+   * Ultimo valor del reloj en orden de fichero: el instante en que acabo la
+   * ronda. Es la referencia preferida para situar los eventos, porque el final
+   * de la ronda si tiene un equivalente en el reloj de pared (el momento en que
+   * el juego cierra el fichero), mientras que el inicio del reloj no lo tiene.
+   */
+  lastTimeRemaining: number;
   localPlayer: ReplayPlayer | null;
 }
 
@@ -132,13 +139,19 @@ export async function parseReplay(fileContents: Buffer): Promise<ParsedReplay | 
 
     if (body.length === 0) {
       log.warn('El cuerpo de la repeticion esta vacio');
-      return { header, events: [], maxTimeRemaining: 0, localPlayer: findLocalPlayer(header) };
+      return {
+        header,
+        events: [],
+        maxTimeRemaining: 0,
+        lastTimeRemaining: 0,
+        localPlayer: findLocalPlayer(header),
+      };
     }
 
     const localPlayer = findLocalPlayer(header);
-    const { events, maxTimeRemaining } = readEvents(body, header, localPlayer);
+    const { events, maxTimeRemaining, lastTimeRemaining } = readEvents(body, header, localPlayer);
 
-    return { header, events, maxTimeRemaining, localPlayer };
+    return { header, events, maxTimeRemaining, lastTimeRemaining, localPlayer };
   } catch (err) {
     log.warn(`No se pudo leer la repeticion: ${(err as Error).message}`);
     return null;
@@ -367,7 +380,7 @@ function readEvents(
   body: Buffer,
   header: ReplayHeader,
   localPlayer: ReplayPlayer | null,
-): { events: ReplayEvent[]; maxTimeRemaining: number } {
+): { events: ReplayEvent[]; maxTimeRemaining: number; lastTimeRemaining: number } {
   const usesModernTime = header.codeVersion >= CODE_Y8S1;
   const timePattern = usesModernTime ? PATTERN_TIME_Y8S1 : PATTERN_TIME_LEGACY;
   const patterns = [PATTERN_MATCH_FEEDBACK, timePattern];
@@ -379,6 +392,7 @@ function readEvents(
   const seen = new Set<string>();
   let currentTime = 0;
   let maxTimeRemaining = 0;
+  let lastTimeRemaining = 0;
 
   for (const match of matches) {
     reader.offset = match.offset + 1;
@@ -387,6 +401,7 @@ function readEvents(
       const time = usesModernTime ? reader.uint32() : parseLegacyTime(reader.string());
       if (time !== null && time >= 0 && time < 10_000) {
         currentTime = time;
+        lastTimeRemaining = time;
         if (time > maxTimeRemaining) maxTimeRemaining = time;
       }
       continue;
@@ -436,7 +451,7 @@ function readEvents(
 
   // Del reloj mayor al menor: el orden cronologico es el inverso del contador.
   events.sort((a, b) => b.timeRemaining - a.timeRemaining);
-  return { events, maxTimeRemaining };
+  return { events, maxTimeRemaining, lastTimeRemaining };
 }
 
 interface FeedbackResult {

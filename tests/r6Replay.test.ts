@@ -12,7 +12,10 @@ import {
   R6ReplayProvider,
   collectReplayFiles,
   findReplayRoots,
+  computeRoundAnchor,
+  absoluteTimeFor,
 } from '../src/core/providers/r6/R6ReplayProvider';
+import { ParsedReplay } from '../src/core/providers/r6/ReplayParser';
 import {
   buildReplayFile,
   buildLegacyReplayFile,
@@ -427,30 +430,23 @@ describe('R6ReplayProvider', () => {
   /**
    * Es lo que impide que todos los marcadores de una ronda se apilen en el
    * instante en que se leyo el fichero.
+   *
+   * Con el anclaje por el final, la referencia es la fecha de modificacion del
+   * fichero, no la marca de la cabecera: ya no hace falta saber cuanto dura la
+   * fase de preparacion.
    */
-  it('calcula la antiguedad real de cada evento en vez de usar la de lectura', async () => {
-    // Ronda que empezo hace exactamente 10 minutos.
-    const roundStart = new Date(Date.now() - 600_000);
-    const datetime = [
-      roundStart.getFullYear(),
-      String(roundStart.getMonth() + 1).padStart(2, '0'),
-      String(roundStart.getDate()).padStart(2, '0'),
-      String(roundStart.getHours()).padStart(2, '0'),
-      String(roundStart.getMinutes()).padStart(2, '0'),
-      String(roundStart.getSeconds()).padStart(2, '0'),
-    ].join('-');
-
+  it('situa cada evento por su instante real, anclando en el final de la ronda', async () => {
     writeReplay(
       'ronda2.rec',
-      buildReplayFile({ ...HEADER, datetime }, [
+      buildReplayFile({ ...HEADER, datetime: datetimeSecondsAgo(600) }, [
         { kind: 'time', secondsRemaining: 180 },
-        // A los 30 s de ronda.
         { kind: 'kill', killer: ME, victim: 'Enemigo' },
         { kind: 'time', secondsRemaining: 150 },
         { kind: 'time', secondsRemaining: 60 },
-        // A los 120 s de ronda.
         { kind: 'kill', killer: ME, victim: 'OtroEnemigo' },
       ]),
+      // La ronda acabo hace 10 segundos.
+      10_000,
     );
 
     const provider = new R6ReplayProvider(documents);
@@ -463,17 +459,23 @@ describe('R6ReplayProvider', () => {
     const kills = received.filter((r) => r.key === 'kill');
     expect(kills).toHaveLength(2);
 
-    // Primera kill: 600 s desde el inicio de ronda, menos 0 s transcurridos.
-    expect(kills[0].latencyHintMs).toBeGreaterThan(590_000);
-    // Segunda kill: 120 s mas tarde dentro de la ronda, luego mas reciente.
-    expect(kills[1].latencyHintMs).toBeLessThan(kills[0].latencyHintMs!);
-    const separation = kills[0].latencyHintMs! - kills[1].latencyHintMs!;
-    expect(separation).toBeCloseTo(120_000, -3);
+    // La ronda acabo con el reloj en 60. La primera kill fue con el reloj en
+    // 180, o sea 120 s antes del final, y el final fue hace 10 s: 130 s.
+    expect(kills[0].latencyHintMs).toBeCloseTo(130_000, -3);
+    // La segunda coincide practicamente con el final.
+    expect(kills[1].latencyHintMs).toBeCloseTo(10_000, -3);
+    // La separacion real entre ambas se conserva.
+    expect(kills[0].latencyHintMs! - kills[1].latencyHintMs!).toBeCloseTo(120_000, -3);
 
     provider.dispose();
   });
 
-  it('aplica el desfase de calibracion', async () => {
+  /**
+   * El desfase configurado ya solo actua en el modo de respaldo, cuando el
+   * anclaje por el final no es fiable. Aqui el reloj no llega a avanzar (un
+   * unico valor), asi que se recurre al inicio y el desfase vuelve a importar.
+   */
+  it('aplica el desfase configurado cuando cae al anclaje por el inicio', async () => {
     writeReplay(
       'ronda3.rec',
       buildReplayFile(HEADER, [
@@ -494,7 +496,6 @@ describe('R6ReplayProvider', () => {
     conDesfase.start(0, { roundOffsetMs: 45_000 });
     await conDesfase.scan();
 
-    // Un desfase de 45 s hace que el evento se considere 45 s mas reciente.
     const diff = a[0].latencyHintMs! - b[0].latencyHintMs!;
     expect(diff).toBeCloseTo(45_000, -3);
 
@@ -702,5 +703,99 @@ describe('Repeticion -> adaptador -> EventManager', () => {
     expect(kills[1].videoTime - kills[0].videoTime).toBeCloseTo(60, 0);
 
     provider.dispose();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+
+describe('computeRoundAnchor', () => {
+  const NOW = 1_756_800_000_000;
+
+  function replay(overrides: Partial<ParsedReplay> = {}): ParsedReplay {
+    return {
+      header: {
+        gameVersion: 'Y9S1',
+        codeVersion: 8211379,
+        // La ronda empezo a grabarse tres minutos antes de "ahora".
+        timestampMs: NOW - 180_000,
+        matchId: 'm',
+        mapId: '1',
+        roundNumber: 1,
+        recordingPlayerId: ME_ID,
+        players: [],
+      },
+      events: [],
+      maxTimeRemaining: 180,
+      lastTimeRemaining: 20,
+      localPlayer: null,
+      ...overrides,
+    };
+  }
+
+  it('prefiere el final de la ronda cuando los datos son coherentes', () => {
+    const anchor = computeRoundAnchor(replay(), NOW, 0);
+    expect(anchor.mode).toBe('end');
+    expect(anchor.referenceMs).toBe(NOW);
+    expect(anchor.referenceClock).toBe(20);
+  });
+
+  /**
+   * La razon de ser del cambio: anclando por el final, el desfase de la fase de
+   * preparacion deja de influir en el resultado.
+   */
+  it('el desfase configurado no altera el resultado en modo final', () => {
+    const sin = computeRoundAnchor(replay(), NOW, 0);
+    const con = computeRoundAnchor(replay(), NOW, 45_000);
+    expect(absoluteTimeFor(sin, 120)).toBe(absoluteTimeFor(con, 120));
+  });
+
+  it('coloca los eventos hacia atras desde el final', () => {
+    const anchor = computeRoundAnchor(replay(), NOW, 0);
+    // Reloj 180 con final en 20: el evento ocurrio 160 s antes de acabar.
+    expect(absoluteTimeFor(anchor, 180)).toBe(NOW - 160_000);
+    // Un evento justo al final coincide con la referencia.
+    expect(absoluteTimeFor(anchor, 20)).toBe(NOW);
+  });
+
+  it('recurre al inicio si el reloj no llega a avanzar', () => {
+    const anchor = computeRoundAnchor(
+      replay({ maxTimeRemaining: 180, lastTimeRemaining: 180 }),
+      NOW,
+      45_000,
+    );
+    expect(anchor.mode).toBe('start');
+    expect(anchor.reason).toContain('no avanza');
+    expect(anchor.referenceMs).toBe(NOW - 180_000 + 45_000);
+  });
+
+  it('recurre al inicio sin fecha de modificacion utilizable', () => {
+    expect(computeRoundAnchor(replay(), 0, 0).mode).toBe('start');
+    expect(computeRoundAnchor(replay(), NaN, 0).mode).toBe('start');
+  });
+
+  /** Si el fichero se copia o se mueve, su fecha deja de significar nada. */
+  it('recurre al inicio si la fecha del fichero es anterior a la cabecera', () => {
+    const anchor = computeRoundAnchor(replay(), NOW - 600_000, 0);
+    expect(anchor.mode).toBe('start');
+    expect(anchor.reason).toContain('anterior');
+  });
+
+  it('recurre al inicio si la fecha del fichero queda demasiado lejos', () => {
+    const anchor = computeRoundAnchor(replay(), NOW + 3_600_000, 0);
+    expect(anchor.mode).toBe('start');
+    expect(anchor.reason).toContain('demasiado lejos');
+  });
+
+  it('recurre al inicio si el reloj consumido no cabe en el tiempo real', () => {
+    // Cabecera de hace 10 s pero 160 s de reloj consumidos: incoherente.
+    const base = replay();
+    const anchor = computeRoundAnchor(
+      { ...base, header: { ...base.header, timestampMs: NOW - 10_000 } },
+      NOW,
+      0,
+    );
+    expect(anchor.mode).toBe('start');
+    expect(anchor.reason).toContain('no cabe');
   });
 });

@@ -157,7 +157,7 @@ export class R6ReplayProvider extends EventEmitter {
           }
 
           this.processed.add(file.path);
-          await this.ingestFile(file.path);
+          await this.ingestFile(file.path, file.mtimeMs);
         }
       }
     } catch (err) {
@@ -167,7 +167,7 @@ export class R6ReplayProvider extends EventEmitter {
     }
   }
 
-  private async ingestFile(path: string): Promise<void> {
+  private async ingestFile(path: string, mtimeMs: number): Promise<void> {
     let parsed: ParsedReplay | null;
     try {
       const contents = await readFile(path);
@@ -188,7 +188,7 @@ export class R6ReplayProvider extends EventEmitter {
         `de ${parsed.localPlayer.username}`,
     );
 
-    for (const raw of this.toRawEvents(parsed)) {
+    for (const raw of this.toRawEvents(parsed, mtimeMs)) {
       this.emit('raw', raw);
     }
     this.emit('round-parsed', {
@@ -205,12 +205,13 @@ export class R6ReplayProvider extends EventEmitter {
    * `value: null`, exactamente igual que las que entrega GEP, asi que no hace
    * falta tocarlo: recibe lo mismo por otra via.
    */
-  private toRawEvents(parsed: ParsedReplay): RawGameEvent[] {
+  private toRawEvents(parsed: ParsedReplay, mtimeMs: number): RawGameEvent[] {
     const now = Date.now();
+    const anchor = this.computeAnchor(parsed, mtimeMs);
     const result: RawGameEvent[] = [];
 
     for (const event of parsed.events) {
-      const occurredAtMs = this.absoluteTimeFor(parsed, event.timeRemaining);
+      const occurredAtMs = absoluteTimeFor(anchor, event.timeRemaining);
       // El evento ya ha ocurrido: se indica cuanto hace, para que se coloque en
       // su sitio del video y no en el instante en que se leyo el fichero.
       const latencyHintMs = Math.max(0, now - occurredAtMs);
@@ -237,16 +238,30 @@ export class R6ReplayProvider extends EventEmitter {
   }
 
   /**
-   * Reconstruye el instante absoluto de un evento.
+   * Elige el punto de referencia para situar los eventos de la ronda.
    *
-   * La cabecera dice cuando empezo a grabarse la ronda y el reloj de partida
-   * cuenta hacia atras, asi que la distancia desde el valor mas alto observado
-   * indica los segundos transcurridos. El desfase entre ambos origenes (la fase
-   * de preparacion) es constante y se ajusta con `roundOffsetMs`.
+   * Ver `computeRoundAnchor` para el razonamiento. Aqui solo se registra la
+   * decision y, cuando se puede, la duracion implicita de la fase de
+   * preparacion, que sirve para comprobar que el modelo temporal cuadra.
    */
-  private absoluteTimeFor(parsed: ParsedReplay, timeRemaining: number): number {
-    const elapsedInRound = Math.max(0, parsed.maxTimeRemaining - timeRemaining);
-    return parsed.header.timestampMs + this.options.roundOffsetMs + elapsedInRound * 1000;
+  private computeAnchor(parsed: ParsedReplay, mtimeMs: number): RoundAnchor {
+    const anchor = computeRoundAnchor(parsed, mtimeMs, this.options.roundOffsetMs);
+
+    if (anchor.mode === 'end') {
+      const roundSpanMs = Math.max(0, parsed.maxTimeRemaining - parsed.lastTimeRemaining) * 1000;
+      const impliedPrepMs = mtimeMs - roundSpanMs - parsed.header.timestampMs;
+      log.info(
+        `Ronda ${parsed.header.roundNumber} anclada por su final. ` +
+          `Fase de preparacion implicita: ${Math.round(impliedPrepMs / 1000)}s`,
+      );
+    } else {
+      log.warn(
+        `Ronda ${parsed.header.roundNumber}: el anclaje por el final no es fiable ` +
+          `(${anchor.reason}); se recurre al inicio con el desfase configurado`,
+      );
+    }
+
+    return anchor;
   }
 
   private setState(state: ProviderState): void {
@@ -258,6 +273,102 @@ export class R6ReplayProvider extends EventEmitter {
     this.stop();
     this.removeAllListeners();
   }
+}
+
+export interface RoundAnchor {
+  /** 'end' usa el final de la ronda; 'start' recurre al inicio con desfase. */
+  mode: 'end' | 'start';
+  /** Instante absoluto que corresponde a `referenceClock`. */
+  referenceMs: number;
+  /** Valor del reloj de ronda en ese instante. */
+  referenceClock: number;
+  reason?: string;
+}
+
+/**
+ * Duracion maxima plausible de una ronda, incluida la preparacion.
+ * Sirve para detectar un mtime que no corresponde al final de la ronda.
+ */
+const MAX_ROUND_WALL_MS = 30 * 60 * 1000;
+
+/**
+ * Decide el punto de referencia temporal de una ronda.
+ *
+ * ## Por que el final y no el inicio
+ *
+ * La cabecera dice cuando EMPEZO A GRABARSE la ronda, pero el reloj de ronda no
+ * arranca en ese momento: antes va la fase de preparacion, que dura distinto
+ * segun el modo de juego. Ese hueco no se puede deducir del fichero, y era lo
+ * que obligaba a calibrar a mano.
+ *
+ * Anclando por el final el problema desaparece. Un evento con el reloj en `C`
+ * ocurrio `C - C_final` segundos antes de acabar la ronda, y la ronda acaba
+ * cuando el juego termina de escribir el fichero, es decir, su fecha de
+ * modificacion. Lo unico que queda sin conocer es el retardo de escritura, de
+ * uno o dos segundos, frente a los cuarenta y pico de la preparacion.
+ *
+ * Hay una segunda ventaja. Siege tiene DOS cuentas atras, la de preparacion y
+ * la de accion, y ambas aparecen en el mismo flujo. Medir desde el valor mas
+ * alto observado da por hecho que hay una sola cuenta monotonica; medir la
+ * diferencia entre dos valores del mismo tramo es inmune a eso.
+ *
+ * ## Cuando NO se puede usar
+ *
+ * La fecha de modificacion deja de ser fiable si el fichero se copia o se mueve.
+ * Por eso se comprueba que sea coherente con la cabecera: el final de la ronda
+ * tiene que caer despues de su inicio y dentro de una duracion plausible. Si no
+ * cuadra, se vuelve al anclaje por el inicio con el desfase configurado.
+ */
+export function computeRoundAnchor(
+  parsed: ParsedReplay,
+  mtimeMs: number,
+  configuredOffsetMs: number,
+): RoundAnchor {
+  const startAnchor: RoundAnchor = {
+    mode: 'start',
+    referenceMs: parsed.header.timestampMs + configuredOffsetMs,
+    referenceClock: parsed.maxTimeRemaining,
+  };
+
+  if (!Number.isFinite(mtimeMs) || mtimeMs <= 0) {
+    return { ...startAnchor, reason: 'sin fecha de modificacion' };
+  }
+
+  // Sin reloj util no hay nada que anclar por el final.
+  if (parsed.maxTimeRemaining <= 0 || parsed.maxTimeRemaining === parsed.lastTimeRemaining) {
+    return { ...startAnchor, reason: 'el reloj de ronda no avanza' };
+  }
+
+  const elapsedWallMs = mtimeMs - parsed.header.timestampMs;
+  if (elapsedWallMs <= 0) {
+    return { ...startAnchor, reason: 'el fichero es anterior a su propia cabecera' };
+  }
+  if (elapsedWallMs > MAX_ROUND_WALL_MS) {
+    return { ...startAnchor, reason: 'la fecha de modificacion queda demasiado lejos' };
+  }
+
+  // El tiempo de reloj consumido no puede superar al tiempo real transcurrido.
+  const roundSpanMs = (parsed.maxTimeRemaining - parsed.lastTimeRemaining) * 1000;
+  if (roundSpanMs > elapsedWallMs + 5000) {
+    return { ...startAnchor, reason: 'la duracion del reloj no cabe en el tiempo real' };
+  }
+
+  return {
+    mode: 'end',
+    referenceMs: mtimeMs,
+    referenceClock: parsed.lastTimeRemaining,
+  };
+}
+
+/**
+ * Situa un evento en el reloj de pared a partir del ancla de su ronda.
+ *
+ * El reloj de ronda cuenta hacia atras, asi que un valor mayor que el de
+ * referencia significa un instante anterior. La misma formula sirve para los
+ * dos modos de anclaje.
+ */
+export function absoluteTimeFor(anchor: RoundAnchor, timeRemaining: number): number {
+  return anchor.referenceMs - (timeRemaining - anchor.referenceClock) * 1000;
 }
 
 /**

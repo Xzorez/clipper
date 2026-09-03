@@ -160,12 +160,29 @@ marcadores se añaden por bloques. Para revisar un vídeo después da igual, per
 consecuencia práctica: la última ronda se escribe cuando el juego ya se ha cerrado, así que Clipper
 espera unos segundos antes de consolidar la grabación para no perderla.
 
-**Precisión temporal y calibración.** Cada evento se sitúa por su instante real, reconstruido con
-la marca temporal de la ronda y el reloj de partida, no por cuándo se leyó el fichero. La distancia
-entre dos kills de la misma ronda es exacta. Lo que no se puede deducir del fichero es cuánto tarda
-el reloj de la ronda en empezar a contar desde que arranca la grabación (la fase de preparación):
-es una constante que se ajusta una sola vez en **Configuración → Eventos → Desfase de las
-repeticiones de Rainbow Six**.
+**Precisión temporal: anclaje por el final de la ronda.** Cada evento se sitúa por su instante
+real, no por cuándo se leyó el fichero.
+
+La forma intuitiva sería anclar al inicio: la cabecera dice cuándo empezó a grabarse la ronda. El
+problema es que el reloj de ronda no arranca en ese momento — antes va la fase de preparación, que
+dura distinto según el modo de juego y no se puede deducir del fichero. Eso obligaría a calibrar a
+mano.
+
+Anclando por el **final** el problema desaparece. Un evento con el reloj en `C` ocurrió
+`C − C_final` segundos antes de acabar la ronda, y la ronda acaba cuando el juego termina de
+escribir el fichero, es decir, su fecha de modificación. El único desconocido pasa a ser el retardo
+de escritura, de un par de segundos, en vez de los cuarenta y pico de la preparación.
+
+Hay una segunda ventaja: Siege tiene **dos cuentas atrás**, la de preparación y la de acción, y
+ambas aparecen en el mismo flujo. Medir desde el valor más alto observado da por hecho que hay una
+sola cuenta monotónica; medir la diferencia entre dos valores del mismo tramo es inmune a eso.
+
+**Cuándo se recurre al inicio.** La fecha de modificación deja de significar nada si las
+repeticiones se copian o se mueven, así que se comprueba que sea coherente con la cabecera: el
+final tiene que caer después del inicio, dentro de una duración plausible, y el tiempo de reloj
+consumido tiene que caber en el tiempo real transcurrido. Si algo no cuadra se vuelve al anclaje
+por el inicio, y ahí sí entra en juego **Configuración → Eventos → Desfase de las repeticiones de
+Rainbow Six**. En uso normal no hay que tocarlo.
 
 **Requisito:** el usuario debe tener activado Match Replay en el juego. Si no existe la carpeta de
 repeticiones, Clipper lo avisa explícitamente en lugar de quedarse callado.
@@ -211,7 +228,7 @@ que los toca está en `ValorantLocalAuth` y `ValorantMatchApi`.
 | Eventos sin Overwolf | **API local de Riot** (LoL), **parser de repeticiones** (R6) e **historial de partidas** (VALORANT) | Fuentes que exponen los propios juegos, sin intermediarios. |
 | Base de datos | **`node:sqlite`** | SQLite real integrado en Node 24. Sin módulos nativos ni `electron-rebuild`. |
 | Clips y miniaturas | **FFmpeg** | Recorte por copia de flujos, sin recodificar. |
-| Tests | **Vitest** | 290 tests, incluidos de integración real con FFmpeg. |
+| Tests | **Vitest** | 298 tests, incluidos de integración real con FFmpeg. |
 
 ### Por qué `node:sqlite` y no `better-sqlite3`
 
@@ -488,11 +505,11 @@ Ten en cuenta dos cosas de este modo:
 1. **Los marcadores aparecen por rondas, no al instante.** La repetición de una ronda se escribe
    cuando la ronda termina, así que sus kills se añaden entonces, todas juntas. Al revisar el vídeo
    después están todas en su sitio.
-2. **Hay que calibrar una vez.** Reproduce la grabación, pulsa un marcador de kill y mira si el
-   vídeo cae antes o después de la acción. Ajusta **Configuración → Eventos → Desfase de las
-   repeticiones de Rainbow Six** hasta que cuadre. Es una constante por modo de juego: se hace una
-   sola vez. El valor de partida es 0 porque no hay forma honesta de estimarlo sin medirlo contra
-   una partida real.
+2. **No hace falta calibrar.** Los eventos se anclan al final de cada ronda, que sí tiene un
+   equivalente exacto en el reloj de pared. En el registro verás, por cada ronda, la duración
+   implícita de la fase de preparación: si sale un valor razonable y constante entre rondas, el
+   modelo temporal está cuadrando. El ajuste de desfase solo entra si el anclaje por el final se
+   descarta, y el registro lo dice cuando pasa.
 
 ### League of Legends
 
@@ -572,7 +589,7 @@ La base de datos SQLite vive en `%APPDATA%\clipper\clipper.db` con las tablas `r
 
 ## 9. Tests
 
-290 tests en 14 ficheros. Los 15 escenarios que pediste, con su ubicación:
+298 tests en 14 ficheros. Los 15 escenarios que pediste, con su ubicación:
 
 | # | Escenario | Fichero |
 |---|---|---|
@@ -629,7 +646,7 @@ src/
   preload/             Puente con contextIsolation
   renderer/            React: páginas, componentes (Timeline, VideoPlayer), estilos
   shared/              Tipos, canales IPC, contrato de API, lógica de timeline
-tests/                 290 tests
+tests/                 298 tests
   helpers/             Generador de repeticiones .rec sintéticas
 ```
 
@@ -643,9 +660,8 @@ resumen de partida, configuración, atajos globales, recuperación tras cierre y
 
 **Fase 3, pendiente de pulir sobre uso real:**
 
-- Calibración de `latencyOffsetMs` para VALORANT y del desfase de repeticiones de Rainbow Six.
-  League of Legends ya no lo necesita: el proveedor de Riot calcula la latencia exacta con el
-  reloj de la partida.
+- Calibración de `latencyOffsetMs` para VALORANT, solo si se usa la vía de Overwolf. Las tres vías
+  nativas calculan el instante de cada evento por su cuenta y no necesitan ajuste.
 - El parser de repeticiones de R6 extrae kills, headshots y muertes. Los eventos de ronda
   (`ROUND_START` / `ROUND_END`) y los plants/defuses están en el formato pero aún no se leen.
 - En VALORANT se podrían derivar los inicios de ronda restando `roundTime` de `gameTime` en
