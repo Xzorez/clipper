@@ -130,6 +130,7 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
     this.ffmpegPath = resolveFfmpegPath();
     if (!this.ffmpegPath) {
       return {
+        status: 'unavailable',
         available: false,
         backend: 'ffmpeg',
         encoders: [],
@@ -146,6 +147,7 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
     this.monitorCount = Math.max(1, displays.length);
 
     return {
+      status: 'ready',
       available: true,
       backend: 'ffmpeg',
       encoders: this.availableEncoders.map((id) => {

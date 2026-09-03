@@ -33,7 +33,13 @@ class FakeRecorder extends EventEmitter implements ScreenRecorder {
   private filePath = '';
 
   async probe() {
-    return { available: true, backend: this.backend, encoders: [], monitors: [] };
+    return {
+      status: 'ready' as const,
+      available: true,
+      backend: this.backend,
+      encoders: [],
+      monitors: [],
+    };
   }
 
   async isRecording(): Promise<boolean> {

@@ -69,6 +69,14 @@ export class RecorderProxy extends EventEmitter implements ScreenRecorder {
         select(this.overwolf, 'paquete recorder de Overwolf disponible');
       });
 
+      // Cuando Overwolf confirma que no va a estar, no hay que esperar mas: se
+      // pasa a FFmpeg al momento en lugar de dejar la interfaz sin saber con
+      // que se va a grabar durante doce segundos.
+      this.overwolf.once('unavailable', (reason: string) => {
+        select(this.ffmpeg, `Overwolf descartado (${reason}); se usa FFmpeg`);
+      });
+
+      // Red de seguridad por si no llega ninguna de las dos senales.
       setTimeout(() => {
         select(
           this.ffmpeg,

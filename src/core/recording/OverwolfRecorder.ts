@@ -16,6 +16,25 @@ import { createLogger } from '../logging/Logger';
 const log = createLogger('Recording');
 
 /**
+ * Variables con las que Overwolf activa el Dev Mode.
+ * Cualquiera de las dos formas vale: par email + clave, o token de desarrollo.
+ */
+function hasDevCredentials(): boolean {
+  const email = process.env.OW_CLI_EMAIL;
+  const apiKey = process.env.OW_CLI_API_KEY;
+  const devKey = process.env.OW_DEV_KEY;
+  return Boolean((email && apiKey) || devKey);
+}
+
+function isPackagedBuild(): boolean {
+  try {
+    return app.isPackaged === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Grabador basado en el paquete `recorder` de ow-electron.
  *
  * Por debajo es OBS: los identificadores de encoder que devuelve
@@ -47,6 +66,35 @@ export class OverwolfRecorder extends EventEmitter implements ScreenRecorder {
     const packages = overwolfApp.overwolf?.packages;
     if (!packages || typeof packages.on !== 'function') {
       log.warn('Paquete recorder no disponible (no se ejecuta bajo ow-electron)');
+      // Se sabe ya: no hay que hacer esperar a nadie los doce segundos.
+      queueMicrotask(() => this.emit('unavailable', 'no se ejecuta bajo ow-electron'));
+      return;
+    }
+
+    // Overwolf avisa cuando un paquete no consigue inicializarse. No siempre
+    // llega (si la verificacion se corta antes, no se emite nada), asi que
+    // sirve de atajo cuando existe, no de unica via.
+    packages.on(
+      'failed-to-initialize' as never,
+      ((_event: unknown, name: string) => {
+        if (name !== 'recorder') return;
+        log.warn('El paquete recorder de Overwolf no pudo inicializarse');
+        this.emit('unavailable', 'el paquete recorder no pudo inicializarse');
+      }) as never,
+    );
+
+    // Atajo fiable en desarrollo. La documentacion de Overwolf es tajante:
+    // "Without valid credentials, the app still runs, but the gaming packages
+    // stay inactive". Si no hay credenciales no tiene sentido esperar doce
+    // segundos a algo que no va a cargar; se pasa a FFmpeg de inmediato.
+    // En una compilacion firmada las credenciales vienen de la firma, no del
+    // entorno, asi que ahi si se espera.
+    if (!isPackagedBuild() && !hasDevCredentials()) {
+      log.info(
+        'Sin credenciales de Overwolf Dev Mode: los paquetes de juego no se cargaran. ' +
+          'Se usa FFmpeg sin esperar.',
+      );
+      queueMicrotask(() => this.emit('unavailable', 'sin credenciales de Dev Mode'));
       return;
     }
 
@@ -97,6 +145,7 @@ export class OverwolfRecorder extends EventEmitter implements ScreenRecorder {
   async probe(): Promise<RecorderCapabilities> {
     if (!this.ready || !this.api) {
       return {
+        status: 'unavailable',
         available: false,
         backend: 'overwolf',
         encoders: [],
@@ -134,6 +183,7 @@ export class OverwolfRecorder extends EventEmitter implements ScreenRecorder {
       });
 
       this.capabilities = {
+        status: 'ready',
         available: true,
         backend: 'overwolf',
         encoders: this.availableEncoders.map(describeEncoder),
@@ -144,6 +194,7 @@ export class OverwolfRecorder extends EventEmitter implements ScreenRecorder {
     } catch (err) {
       log.error(`queryInformation fallo: ${(err as Error).message}`);
       return {
+        status: 'unavailable',
         available: false,
         backend: 'overwolf',
         encoders: [],

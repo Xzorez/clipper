@@ -118,14 +118,7 @@ export function HomePage({
           }}
         >
           <span>
-            Captura:{' '}
-            <strong style={{ color: 'var(--text-1)' }}>
-              {status?.recorder.backend === 'overwolf'
-                ? 'Overwolf (OBS, hardware)'
-                : status?.recorder.backend === 'ffmpeg'
-                  ? 'FFmpeg (escritorio)'
-                  : 'no disponible'}
-            </strong>
+            Captura: <strong style={{ color: 'var(--text-1)' }}>{recorderLabel(status)}</strong>
           </span>
           <span>
             Eventos:{' '}
@@ -191,6 +184,14 @@ function LiveStat({
   );
 }
 
+function recorderLabel(status: LiveStatus | null): string {
+  if (!status || status.recorder.status === 'checking') return 'comprobando...';
+  if (status.recorder.status === 'unavailable') return 'no disponible';
+  return status.recorder.backend === 'overwolf'
+    ? 'Overwolf (OBS, hardware)'
+    : 'FFmpeg (pantalla, automatico)';
+}
+
 function providerLabel(status: LiveStatus | null): string {
   if (!status) return 'comprobando...';
   const name =
@@ -213,7 +214,10 @@ function providerLabel(status: LiveStatus | null): string {
     case 'error':
       return 'error';
     default:
-      return 'no disponible';
+      // Que GEP no este no significa quedarse sin eventos: cada juego tiene su
+      // via nativa, que se activa al detectarlo. Decir "no disponible" aqui
+      // asustaba sin motivo.
+      return 'vias nativas, por juego';
   }
 }
 
@@ -264,48 +268,50 @@ function ProviderBanners({
     );
   } else if (status.provider.status === 'unavailable') {
     banners.push(
-      <div className="banner banner--warning" key="gep">
-        <span style={{ fontSize: 17 }}>⚠</span>
+      <div className="banner banner--info" key="gep">
+        <span style={{ fontSize: 17 }}>ℹ</span>
         <div>
-          <div className="banner__title">Overwolf no esta disponible</div>
+          <div className="banner__title">Funcionando sin Overwolf</div>
           <div className="banner__body">
-            {status.provider.message ??
-              'El paquete de eventos de Overwolf no se ha cargado.'}{' '}
-            <strong>League of Legends</strong> sigue funcionando con marcadores completos, porque
-            usa la API local del cliente de Riot. <strong>Rainbow Six Siege</strong> tambien, leyendo
-            las repeticiones que el propio juego guarda al terminar cada ronda (requiere tener
-            activado Match Replay). El unico que se queda sin marcadores automaticos es{' '}
-            <strong>VALORANT</strong>: esas partidas se grabaran igual, y puedes marcar momentos a
-            mano con <span className="kbd">F9</span>.
+            Los tres juegos tienen marcadores igualmente, usando las fuentes que ellos mismos
+            exponen: la API local de Riot en League of Legends, las repeticiones del juego en
+            Rainbow Six (requiere tener activado Match Replay) y el historial de partidas en
+            VALORANT. Frente a Overwolf solo se pierden dos cosas: los marcadores de Rainbow Six
+            y VALORANT aparecen al terminar la partida en vez de en directo, y VALORANT no
+            distingue headshots. No hay nada que configurar.
           </div>
         </div>
       </div>,
     );
   }
 
-  if (status.recorder.backend === 'ffmpeg' && status.recorder.available) {
+  if (status.recorder.status === 'ready' && status.recorder.backend === 'ffmpeg') {
     banners.push(
       <div className="banner banner--info" key="ffmpeg">
         <span style={{ fontSize: 17 }}>ℹ</span>
         <div>
           <div className="banner__title">Grabando con FFmpeg</div>
           <div className="banner__body">
-            Se captura el escritorio en lugar del proceso del juego. Funciona, pero consume
-            mas CPU y algunos juegos a pantalla completa exclusiva pueden salir en negro.
+            Se captura la pantalla en lugar del proceso del juego. Clipper elige solo el monitor
+            y el metodo, comprobando que se vea imagen de verdad, asi que no tienes que
+            configurar nada.
           </div>
         </div>
       </div>,
     );
   }
 
-  if (!status.recorder.available && status.recorder.backend === 'none') {
+  // Solo se avisa cuando la comprobacion ha TERMINADO sin encontrar nada.
+  // Mientras esta en curso no se puede afirmar que no haya sistema de captura.
+  if (status.recorder.status === 'unavailable') {
     banners.push(
       <div className="banner banner--error" key="norecorder">
         <span style={{ fontSize: 17 }}>⛔</span>
         <div>
           <div className="banner__title">No hay ningun sistema de captura disponible</div>
           <div className="banner__body">
-            {status.recorder.message ?? 'No se ha encontrado ningun codificador de video utilizable.'}
+            {status.recorder.message ??
+              'No se ha encontrado ningun codificador de video utilizable.'}
           </div>
         </div>
       </div>,

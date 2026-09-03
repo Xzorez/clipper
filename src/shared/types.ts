@@ -133,6 +133,16 @@ export interface MonitorSummary {
 }
 
 export interface RecorderCapabilities {
+  /**
+   * En que punto esta la deteccion del sistema de captura.
+   *
+   * Hace falta distinguir "todavia no lo se" de "no hay nada": al arrancar se
+   * espera unos segundos a que cargue el paquete de Overwolf, y durante esa
+   * espera no se puede afirmar que no haya sistema de captura. Confundir ambos
+   * estados hacia que la interfaz mostrara un error alarmante en un arranque
+   * perfectamente normal.
+   */
+  status: 'checking' | 'ready' | 'unavailable';
   available: boolean;
   backend: 'overwolf' | 'ffmpeg' | 'none';
   encoders: EncoderInfo[];
@@ -307,7 +317,7 @@ export interface LogEntry {
   message: string;
 }
 
-/** Capacidades vacias, usadas antes de sondear el grabador. */
+/** Estado inicial: aun no se sabe con que se va a capturar. */
 export function emptyRecorderCapabilities(): RecorderCapabilities {
-  return { available: false, backend: 'none', encoders: [], monitors: [] };
+  return { status: 'checking', available: false, backend: 'none', encoders: [], monitors: [] };
 }

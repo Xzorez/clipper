@@ -450,6 +450,11 @@ npm start
 npm start
 ```
 
+Clipper detecta al arrancar que no hay credenciales de Overwolf y pasa a FFmpeg de inmediato, sin
+esperas: la documentación de Overwolf es tajante en que sin credenciales los paquetes de juego no
+se cargan, así que no tiene sentido aguardarlos. En pantalla verás avisos informativos explicando
+qué vía se está usando, no errores.
+
 Qué funciona en este modo:
 
 - **Grabación de vídeo**: sí, con FFmpeg, y sin configurar nada. Al empezar la primera grabación

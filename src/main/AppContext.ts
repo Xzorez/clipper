@@ -287,6 +287,7 @@ export class AppContext {
     } catch (err) {
       log.error(`No se pudo sondear el grabador: ${(err as Error).message}`);
       this.recorderCapabilities = {
+        status: 'unavailable',
         available: false,
         backend: 'none',
         encoders: [],
