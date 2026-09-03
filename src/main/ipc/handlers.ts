@@ -4,6 +4,7 @@ import { AppContext } from '../AppContext';
 import { IPC } from '../../shared/channels';
 import { GameEventType, GameKey } from '../../shared/types';
 import { SidecarStore } from '../../core/recording/SidecarStore';
+import { diagnoseValorant } from '../../core/providers/valorant/ValorantLocalAuth';
 import { createLogger, loggerRoot } from '../../core/logging/Logger';
 
 const log = createLogger('Main');
@@ -44,7 +45,8 @@ export function registerIpcHandlers(context: AppContext, getWindow: WindowGetter
 
   handle(IPC.GET_LOGS, () => loggerRoot.getBuffer());
 
-  handle(IPC.GET_DIAGNOSTICS, () => ({
+  handle(IPC.GET_DIAGNOSTICS, async () => ({
+    valorant: await diagnoseValorant(),
     electron: process.versions.electron,
     node: process.versions.node,
     chrome: process.versions.chrome,

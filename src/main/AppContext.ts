@@ -21,6 +21,7 @@ import { AdapterRegistry } from '../core/games/registry';
 import { GepProvider } from '../core/gep/GepProvider';
 import { RiotLiveClientProvider } from '../core/providers/RiotLiveClientProvider';
 import { R6ReplayProvider } from '../core/providers/r6/R6ReplayProvider';
+import { ValorantMatchProvider } from '../core/providers/valorant/ValorantMatchProvider';
 import { ProcessWatcher } from '../core/detection/ProcessWatcher';
 import { GameDetectionService } from '../core/detection/GameDetectionService';
 import { EventManager, emptySummary } from '../core/events/EventManager';
@@ -51,6 +52,7 @@ export class AppContext {
   gep!: GepProvider;
   riot!: RiotLiveClientProvider;
   r6Replay!: R6ReplayProvider;
+  valorant!: ValorantMatchProvider;
   processWatcher!: ProcessWatcher;
   eventManager!: EventManager;
   recordingClock!: RecordingClock;
@@ -63,6 +65,7 @@ export class AppContext {
   private providerState: ProviderState = { status: 'unavailable', provider: 'none' };
   private riotState: ProviderState = { status: 'unavailable', provider: 'riot-live-client' };
   private r6State: ProviderState = { status: 'unavailable', provider: 'r6-replay' };
+  private valorantState: ProviderState = { status: 'unavailable', provider: 'valorant-match-api' };
   private lastWarning: string | null = null;
   private statusTimer: NodeJS.Timeout | null = null;
   private diskFreeGb: number | null = null;
@@ -106,6 +109,7 @@ export class AppContext {
     this.gep = new GepProvider(this.registry);
     this.riot = new RiotLiveClientProvider();
     this.r6Replay = new R6ReplayProvider();
+    this.valorant = new ValorantMatchProvider();
     this.processWatcher = new ProcessWatcher(this.registry);
     this.detection = new GameDetectionService(
       this.registry,
@@ -116,6 +120,7 @@ export class AppContext {
       this.settings,
       this.riot,
       this.r6Replay,
+      this.valorant,
     );
 
     this.hotkeys = new HotkeyService();
@@ -159,6 +164,11 @@ export class AppContext {
 
     this.detection.on('riot-state', (state: ProviderState) => {
       this.riotState = state;
+      this.broadcastStatus();
+    });
+
+    this.detection.on('valorant-state', (state: ProviderState) => {
+      this.valorantState = state;
       this.broadcastStatus();
     });
 
@@ -331,6 +341,7 @@ export class AppContext {
     // marcadores.
     if (this.riotState.status === 'connected') return this.riotState;
     if (this.r6State.status === 'connected') return this.r6State;
+    if (this.valorantState.status === 'connected') return this.valorantState;
     return this.providerState;
   }
 

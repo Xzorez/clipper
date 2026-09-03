@@ -490,6 +490,7 @@ function Diagnostics({ status }: { status: LiveStatus | null }) {
               {status?.recorder.encoders.map((e) => e.label).join(', ') || 'ninguno'}
             </span>
           </Row>
+          {info?.valorant ? <ValorantDiagnostics data={info.valorant as Record<string, unknown>} /> : null}
           {info &&
             Object.entries(info)
               .filter(([key]) => ['electron', 'node', 'chrome', 'platform', 'isElevated'].includes(key))
@@ -514,6 +515,41 @@ function Diagnostics({ status }: { status: LiveStatus | null }) {
           ))
         )}
       </div>
+    </>
+  );
+}
+
+/**
+ * Estado de la via nativa de VALORANT.
+ *
+ * El flujo solo queda confirmado con el juego abierto, asi que conviene que el
+ * usuario pueda comprobarlo de un vistazo en lugar de adivinar.
+ */
+function ValorantDiagnostics({ data }: { data: Record<string, unknown> }) {
+  const ok = (value: unknown) => (value ? 'si' : 'no');
+  return (
+    <>
+      <Row label="VALORANT: registro del juego" hint="Necesario para saber tu region y version.">
+        <span style={{ color: 'var(--text-1)', fontSize: 12 }}>
+          {ok(data.gameLog)}
+          {data.version ? ` (${String(data.version)})` : ''}
+        </span>
+      </Row>
+      <Row label="VALORANT: cliente de Riot abierto">
+        <span style={{ color: 'var(--text-1)', fontSize: 12 }}>{ok(data.lockfile)}</span>
+      </Row>
+      <Row label="VALORANT: sesion disponible" hint={String(data.hint ?? '')}>
+        <span
+          style={{
+            color: data.session ? 'var(--success)' : 'var(--warning)',
+            fontSize: 12,
+            fontWeight: 600,
+          }}
+        >
+          {ok(data.session)}
+          {data.shard ? ` · region ${String(data.shard)}` : ''}
+        </span>
+      </Row>
     </>
   );
 }

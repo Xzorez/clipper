@@ -198,7 +198,9 @@ function providerLabel(status: LiveStatus | null): string {
       ? 'API de Riot'
       : status.provider.provider === 'r6-replay'
         ? 'Repeticiones de R6'
-        : 'GEP';
+        : status.provider.provider === 'valorant-match-api'
+          ? 'Historial de VALORANT'
+          : 'GEP';
   switch (status.provider.status) {
     case 'connected':
       return `${name} conectado`;

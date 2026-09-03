@@ -15,6 +15,7 @@ import { RecordingManager } from '../recording/RecordingManager';
 import { SettingsService } from '../services/SettingsService';
 import { RiotLiveClientProvider } from '../providers/RiotLiveClientProvider';
 import { R6ReplayProvider } from '../providers/r6/R6ReplayProvider';
+import { ValorantMatchProvider } from '../providers/valorant/ValorantMatchProvider';
 import { createLogger } from '../logging/Logger';
 
 const log = createLogger('GameDetection');
@@ -73,6 +74,7 @@ export class GameDetectionService extends EventEmitter {
     private readonly settingsService: SettingsService,
     private readonly riot?: RiotLiveClientProvider,
     private readonly r6Replay?: R6ReplayProvider,
+    private readonly valorant?: ValorantMatchProvider,
   ) {
     super();
     this.wire();
@@ -213,6 +215,19 @@ export class GameDetectionService extends EventEmitter {
       });
     }
 
+    if (this.valorant) {
+      this.valorant.on('raw', (raw: RawGameEvent) => {
+        if (this.gepUsable) return;
+        if (this.activeAdapter?.game !== 'valorant') return;
+        this.eventManager.ingest(raw);
+      });
+
+      this.valorant.on('state', (state: ProviderState) => {
+        this.emit('valorant-state', state);
+        this.emitChange();
+      });
+    }
+
     this.recordingManager.on('warning', (warning: { title: string; message: string }) => {
       this.lastError = `${warning.title}: ${warning.message}`;
       this.emit('warning', warning);
@@ -253,6 +268,12 @@ export class GameDetectionService extends EventEmitter {
     // escribe el propio juego al terminar cada ronda.
     if (adapter.game === 'rainbowsix' && !this.gepUsable && this.r6Replay) {
       this.r6Replay.start(Date.now(), { roundOffsetMs: settings.events.r6RoundOffsetMs });
+    }
+
+    // VALORANT sin Overwolf: el historial personal de partidas de Riot, que se
+    // consulta al terminar cada partida.
+    if (adapter.game === 'valorant' && !this.gepUsable && this.valorant) {
+      this.valorant.start(Date.now());
     }
 
     if (!settings.recording.autoRecord) {
@@ -322,6 +343,13 @@ export class GameDetectionService extends EventEmitter {
         this.r6Replay.stop();
       }
 
+      // Lo mismo para VALORANT: la partida aparece en el historial cuando ha
+      // terminado, con el juego ya cerrandose.
+      if (adapter.game === 'valorant' && !this.gepUsable && this.valorant) {
+        await this.valorant.drain();
+        this.valorant.stop();
+      }
+
       if (this.recordingManager.isRecording) {
         await this.recordingManager.stop();
       }
@@ -367,6 +395,7 @@ export class GameDetectionService extends EventEmitter {
     this.cancelStopTimer();
     this.riot?.dispose();
     this.r6Replay?.dispose();
+    this.valorant?.dispose();
     this.processWatcher.dispose();
     this.gep.dispose();
     this.removeAllListeners();

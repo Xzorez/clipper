@@ -105,7 +105,7 @@ con su verdad por juego:
 |---|---|---|
 | **League of Legends** | Live Client Data API de Riot | **Implementada** |
 | **Rainbow Six Siege** | Parseo de los ficheros de repetición del juego | **Implementada** |
-| **VALORANT** | No existe fuente estructurada legítima | Solo Overwolf |
+| **VALORANT** | Historial personal de partidas de Riot | **Implementada** (sin headshots) |
 
 ### League of Legends: implementado y sin Overwolf
 
@@ -170,12 +170,32 @@ repeticiones de Rainbow Six**.
 **Requisito:** el usuario debe tener activado Match Replay en el juego. Si no existe la carpeta de
 repeticiones, Clipper lo avisa explícitamente en lugar de quedarse callado.
 
-### VALORANT: no hay alternativa legítima
+### VALORANT: implementado y sin Overwolf
 
-La API local del cliente de Riot (la del `lockfile`) da presencia, party y estado de partida, pero
-**no da kills ni muertes**. Los logs de VALORANT no contienen eventos de combate. Y la política de
-Riot restringe los overlays en tiempo real. La única alternativa sería detección visual del
-killfeed, que es un último recurso frágil y queda deliberadamente fuera del proyecto.
+No hay kills en tiempo real —Riot no las expone y su política rechaza los overlays que dan ventaja
+durante la partida— pero sí hay algo mejor de lo que parecía: **el historial personal de partidas**,
+que esa misma política acepta de forma explícita.
+
+**Cómo funciona.** El cliente de Riot escribe un `lockfile` con un puerto y una contraseña. Con
+ellos se le piden al propio cliente las credenciales de la sesión, y con esas credenciales se
+consulta el detalle de tus partidas. Sin inyección, sin lectura de memoria, sin contacto con el
+proceso del juego: es leer un fichero que el cliente deja en tu disco y hacer peticiones HTTPS a
+los servidores de Riot sobre tus propias partidas.
+
+**Es la mejor sincronización de los tres juegos.** El detalle trae `gameStartMillis` (el instante
+absoluto de inicio) y cada kill su `gameTime` en milisegundos desde ese inicio. Sumándolos sale el
+momento exacto del evento. Rainbow Six necesita un ajuste manual porque su fichero no dice cuándo
+arranca el reloj de ronda; aquí ese problema sencillamente no existe.
+
+**Lo que no da: headshots.** El detalle solo trae disparos a la cabeza agregados por ronda, que no
+permiten saber si el disparo mortal lo fue. Deducirlo sería inventarse el dato, así que esta vía no
+emite headshots. Es la única diferencia funcional frente a Overwolf.
+
+**Manejo de credenciales.** Los tokens son credenciales de la cuenta. Viven solo en memoria, nunca
+se escriben en el registro ni en la base de datos, y solo viajan a `*.a.pvp.net`. Todo el código
+que los toca está en `ValorantLocalAuth` y `ValorantMatchApi`.
+
+**Es post-partida**, como Rainbow Six: la partida aparece en el historial cuando termina.
 
 ---
 
@@ -188,10 +208,10 @@ killfeed, que es un último recurso frágil y queda deliberadamente fuera del pr
 | Interfaz | **React 18 + Vite** | Reproductor `<video>` nativo con aceleración por hardware. |
 | Captura | **Paquete `recorder` de ow-electron** (OBS por debajo) | NVENC / AMF / Quick Sync y captura del *proceso* del juego. |
 | Captura de respaldo | **FFmpeg** con `ddagrab` (Desktop Duplication por GPU) | Para que siempre se grabe algo, aunque falte el ecosistema Overwolf. |
-| Eventos sin Overwolf | **Live Client Data API de Riot** (LoL) y **parser de repeticiones** (R6) | Fuentes que exponen los propios juegos, sin intermediarios. |
+| Eventos sin Overwolf | **API local de Riot** (LoL), **parser de repeticiones** (R6) e **historial de partidas** (VALORANT) | Fuentes que exponen los propios juegos, sin intermediarios. |
 | Base de datos | **`node:sqlite`** | SQLite real integrado en Node 24. Sin módulos nativos ni `electron-rebuild`. |
 | Clips y miniaturas | **FFmpeg** | Recorte por copia de flujos, sin recodificar. |
-| Tests | **Vitest** | 259 tests, incluidos de integración real con FFmpeg. |
+| Tests | **Vitest** | 290 tests, incluidos de integración real con FFmpeg. |
 
 ### Por qué `node:sqlite` y no `better-sqlite3`
 
@@ -420,6 +440,30 @@ Qué debe aparecer: `KILL`, `DEATH`, `HEADSHOT`, `ASSIST`, `MATCH_START`, `MATCH
 derivadas de `round_phase`. Una kill con headshot genera **dos** marcadores (kill + headshot):
 es correcto y deliberado.
 
+**Sin Overwolf.** Antes de jugar, abre **Configuración → Diagnóstico** y mira las tres líneas de
+VALORANT. Con el juego cerrado verás algo así:
+
+```
+VALORANT: registro del juego   si (release-13.00-shipping-32-4990475)
+VALORANT: cliente de Riot abierto   si
+VALORANT: sesion disponible    no
+```
+
+Es normal: la sesión solo aparece al iniciar VALORANT. Con el juego en marcha las tres deben decir
+que sí, y la región debe ser la tuya. Si es así, al terminar la partida verás en el registro:
+
+```
+[Valorant] Credenciales de la sesion de VALORANT obtenidas del cliente local
+[Valorant] Partida leida: 27 eventos del jugador local
+```
+
+Dos diferencias respecto a la vía de Overwolf:
+
+1. **Los marcadores aparecen al terminar la partida**, no durante. La partida solo entra en el
+   historial cuando ha acabado.
+2. **No hay headshots.** El historial no dice si el disparo mortal fue a la cabeza. Kills, muertes
+   y asistencias sí, con sincronización exacta.
+
 ### Rainbow Six Siege
 
 1. Arranca Clipper, luego Siege.
@@ -528,7 +572,7 @@ La base de datos SQLite vive en `%APPDATA%\clipper\clipper.db` con las tablas `r
 
 ## 9. Tests
 
-259 tests en 13 ficheros. Los 15 escenarios que pediste, con su ubicación:
+290 tests en 14 ficheros. Los 15 escenarios que pediste, con su ubicación:
 
 | # | Escenario | Fichero |
 |---|---|---|
@@ -555,6 +599,7 @@ Ficheros adicionales:
 | `riotLiveClient.test.ts` | Proveedor nativo de LoL: detección, deduplicado por `EventID`, traducción de kill/muerte/asistencia, precisión temporal, fin de partida y cadena completa hasta el marcador |
 | `ffmpegArgs.test.ts` | Argumentos de `ddagrab` y `gdigrab`, intervalo de keyframes y flags de resistencia a cortes |
 | `r6Replay.test.ts` | Parser de repeticiones de R6: cabecera, descompresión por tramas con huecos, extracción de kills/headshots/muertes, deduplicado, ficheros corruptos y cadena completa hasta el marcador |
+| `valorantMatchApi.test.ts` | Vía nativa de VALORANT: lectura del lockfile y del registro del juego, extracción de kills/muertes/asistencias con instante absoluto, deduplicado, renovación de credenciales y cadena completa hasta el marcador |
 
 `clips.test.ts` es una prueba de integración real: genera un vídeo con FFmpeg, recorta un clip y
 verifica que el fichero resultante existe y es válido.
@@ -572,6 +617,8 @@ src/
     gep/               GepProvider (envoltura de app.overwolf.packages.gep)
     providers/         RiotLiveClientProvider (LoL sin Overwolf)
                        r6/ DissectReader, ReplayParser, R6ReplayProvider (R6 sin Overwolf)
+                       valorant/ ValorantLocalAuth, ValorantMatchApi,
+                                 ValorantMatchProvider (VALORANT sin Overwolf)
     detection/         GameDetectionService (máquina de estados), ProcessWatcher
     recording/         RecordingManager, ScreenRecorder, OverwolfRecorder,
                        FFmpegRecorder, RecorderProxy, DiskSpaceGuard, SidecarStore
@@ -582,7 +629,7 @@ src/
   preload/             Puente con contextIsolation
   renderer/            React: páginas, componentes (Timeline, VideoPlayer), estilos
   shared/              Tipos, canales IPC, contrato de API, lógica de timeline
-tests/                 259 tests
+tests/                 290 tests
   helpers/             Generador de repeticiones .rec sintéticas
 ```
 
@@ -599,8 +646,10 @@ resumen de partida, configuración, atajos globales, recuperación tras cierre y
 - Calibración de `latencyOffsetMs` para VALORANT y del desfase de repeticiones de Rainbow Six.
   League of Legends ya no lo necesita: el proveedor de Riot calcula la latencia exacta con el
   reloj de la partida.
-- El parser de repeticiones extrae kills, headshots y muertes. Los eventos de ronda
+- El parser de repeticiones de R6 extrae kills, headshots y muertes. Los eventos de ronda
   (`ROUND_START` / `ROUND_END`) y los plants/defuses están en el formato pero aún no se leen.
+- En VALORANT se podrían derivar los inicios de ronda restando `roundTime` de `gameTime` en
+  cualquier kill de esa ronda. Es exacto donde hay kills, pero deja fuera las rondas sin ninguna.
 - Estadísticas agregadas entre partidas (K/D por mapa, evolución temporal).
 - Buffer de repetición para clips retroactivos (`startReplays` del paquete recorder, ya disponible
   en la API pero no cableado).
@@ -609,10 +658,17 @@ resumen de partida, configuración, atajos globales, recuperación tras cierre y
 
 ## 12. Limitaciones conocidas, sin adornos
 
-- **Sin credenciales de Overwolf, el único juego que se queda sin marcadores es VALORANT.**
-  League of Legends funciona por la API local de Riot y Rainbow Six por sus repeticiones. Para
-  VALORANT no existe fuente estructurada legítima, y no es un fallo de la aplicación: es cómo
-  funciona el ecosistema. La interfaz lo indica claramente.
+- **Overwolf ya no es necesario para ningún juego.** Los tres tienen vía nativa. Overwolf sigue
+  aportando dos cosas: eventos en tiempo real (las vías nativas de R6 y VALORANT son post-partida)
+  y headshots en VALORANT.
+- **La vía nativa de VALORANT no da headshots.** El historial solo trae disparos a la cabeza
+  agregados por ronda, insuficiente para saber si el disparo mortal lo fue. Inventarlo sería peor
+  que no darlo.
+- **La vía nativa de VALORANT está verificada a medias contra el entorno real.** Se comprobó
+  sobre esta máquina la lectura del lockfile, del registro del juego, de la versión del cliente y
+  de la región. El intercambio de credenciales no se pudo verificar porque requiere VALORANT en
+  marcha: con solo el cliente de Riot en segundo plano, su API expone siete funciones y ninguna
+  ruta de sesión. Por eso existe la comprobación en Configuración → Diagnóstico.
 - **El parser de repeticiones de Rainbow Six está verificado contra ficheros sintéticos, no contra
   partidas reales.** No había repeticiones disponibles en el equipo de desarrollo, así que los 38
   tests construyen ficheros `.rec` con el formato exacto y comprueban el parser de forma
