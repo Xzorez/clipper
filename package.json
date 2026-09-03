@@ -1,0 +1,58 @@
+{
+  "name": "clipper",
+  "version": "0.1.0",
+  "description": "Grabador automatico de partidas con eventos de juego en la linea temporal (VALORANT, Rainbow Six Siege, League of Legends)",
+  "main": "dist/main/main/index.js",
+  "author": "Clipper",
+  "license": "MIT",
+  "private": true,
+  "overwolf": {
+    "packages": [
+      "gep",
+      "recorder",
+      "utility"
+    ]
+  },
+  "scripts": {
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "vite build",
+    "build": "npm run build:main && npm run build:renderer",
+    "dev:renderer": "vite",
+    "start": "npm run build && ow-electron .",
+    "start:vanilla": "npm run build && electron .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "dist": "npm run build && ow-electron-builder --publish=never"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0"
+  },
+  "devDependencies": {
+    "@overwolf/ow-electron": "42.7.1",
+    "@overwolf/ow-electron-builder": "^26.9.2",
+    "@overwolf/ow-electron-packages-types": "^1.1.10",
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vitest": "^2.1.8"
+  },
+  "build": {
+    "appId": "com.clipper.app",
+    "productName": "Clipper",
+    "asar": true,
+    "nodeGypRebuild": false,
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "resources/**/*", "node_modules/**/*", "package.json"],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist/main",
+    "rootDir": "src",
+    "sourceMap": true,
+    "types": ["node", "@overwolf/ow-electron-packages-types"]
+  },
+  "include": ["src/main/**/*", "src/core/**/*", "src/preload/**/*", "src/shared/**/*"]
+}
