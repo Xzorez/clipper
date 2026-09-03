@@ -131,6 +131,15 @@ export class RecordingManager extends EventEmitter {
     });
 
     this.recorder.on('stats', (stats: unknown) => this.emit('stats', stats));
+
+    // La captura ha dejado de ver imagen a mitad de grabacion. No se reinicia
+    // (perderia continuidad y el ancla del reloj); se avisa, que es lo util.
+    this.recorder.on('capture-blank', (payload: { message: string }) => {
+      this.emit('warning', {
+        title: 'La grabacion ha dejado de captar imagen',
+        message: payload.message,
+      });
+    });
   }
 
   private wireEvents(): void {
@@ -231,11 +240,10 @@ export class RecordingManager extends EventEmitter {
       });
     } catch (err) {
       this.eventManager.end();
-      this.fail(
-        'No se ha podido iniciar la captura',
-        `${(err as Error).message}. Comprueba que tienes espacio disponible y que ` +
-          'ningun otro programa esta usando el codificador de video.',
-      );
+      // El mensaje del grabador ya explica que hacer cuando la causa es
+      // conocida (por ejemplo, pantalla completa exclusiva). No se le anade
+      // texto generico que lo diluya.
+      this.fail('No se ha podido iniciar la captura', (err as Error).message);
       return null;
     }
 

@@ -12,6 +12,21 @@ import {
 } from './ScreenRecorder';
 import { createLogger } from '../logging/Logger';
 import { resolveFfmpegPath } from './ffmpegPath';
+import { buildFfmpegArgs, CaptureMethod, FfmpegArgsContext } from './captureArgs';
+import {
+  CaptureCandidate,
+  buildCandidates,
+  createProbeRunner,
+  describeCandidate,
+  explainFailure,
+  probeCandidate,
+  selectCapture,
+} from './CaptureProbe';
+
+// Se reexportan para que el resto del proyecto siga teniendo un unico punto de
+// entrada al grabador por FFmpeg.
+export { buildFfmpegArgs };
+export type { CaptureMethod, FfmpegArgsContext };
 
 const log = createLogger('Recording');
 const execFileAsync = promisify(execFile);
@@ -33,77 +48,15 @@ const FFMPEG_ENCODERS: Array<{
   { id: 'libx264', label: 'x264 (software)', vendor: 'software', hardware: false },
 ];
 
-/** Metodo de captura de pantalla. */
-export type CaptureMethod = 'ddagrab' | 'gdigrab';
-
-export interface FfmpegArgsContext {
-  encoder: string;
-  width: number;
-  height: number;
-  fps: number;
-  bitrateKbps: number;
-}
-
-/**
- * Construye la linea de comandos de FFmpeg.
- *
- * Se expone como funcion pura para poder verificar en los tests que ddagrab y
- * gdigrab producen los argumentos correctos, sin lanzar procesos.
- *
- * Diferencia clave entre ambos: con ddagrab el filtro ES la fuente y no hay
- * `-i`; con gdigrab la fuente es `-i desktop` y el escalado va en `-vf`.
- */
-export function buildFfmpegArgs(
-  method: CaptureMethod,
-  context: FfmpegArgsContext,
-  filePath: string,
-): string[] {
-  const { encoder, width, height, fps, bitrateKbps } = context;
-
-  const source: string[] =
-    method === 'ddagrab'
-      ? [
-          // La captura ocurre en la GPU; hwdownload la trae a memoria para que
-          // el encoder la consuma. El filtro ES la fuente: no hay -i.
-          '-init_hw_device', 'd3d11va',
-          '-filter_complex',
-          `ddagrab=output_idx=0:framerate=${fps}:draw_mouse=0,` +
-            `hwdownload,format=bgra,scale=${width}:${height}:flags=bilinear,format=nv12`,
-        ]
-      : [
-          '-f', 'gdigrab',
-          '-framerate', String(fps),
-          '-draw_mouse', '0',
-          '-i', 'desktop',
-          '-vf', `scale=${width}:${height}:flags=bilinear`,
-        ];
-
-  return [
-    '-hide_banner',
-    '-loglevel', 'error',
-    ...source,
-    '-c:v', encoder,
-    '-b:v', `${bitrateKbps}k`,
-    '-maxrate', `${Math.round(bitrateKbps * 1.2)}k`,
-    '-bufsize', `${bitrateKbps * 2}k`,
-    // Keyframe cada 2 segundos: permite cortar clips sin recodificar.
-    '-g', String(fps * 2),
-    '-pix_fmt', 'yuv420p',
-    // faststart no sirve escribiendo en directo; frag_keyframe deja el fichero
-    // legible aunque el proceso muera de forma abrupta.
-    '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
-    '-progress', 'pipe:1',
-    '-y',
-    filePath,
-  ];
-}
-
 /**
  * Margen para decidir que un arranque ha fracasado.
  * Si FFmpeg muere antes de producir un solo fotograma y antes de este plazo,
  * se considera que el metodo de captura no es viable en esta maquina.
  */
 const STARTUP_GRACE_MS = 6000;
+
+/** Cuando se comprueba que la grabacion en curso sigue viendo imagen. */
+const VERIFY_AFTER_MS = 12_000;
 
 /**
  * Grabador de respaldo basado en FFmpeg.
@@ -150,6 +103,8 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
    */
   private encodersProbe: Promise<void> | null = null;
   private ddagrabProbe: Promise<void> | null = null;
+  private monitorCount = 1;
+  private lastProbeFailure: string | null = null;
 
   private currentFilePath: string | null = null;
   private startedAtEpochMs: number | null = null;
@@ -157,11 +112,19 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
   private firstFrameSeen = false;
   private stopping = false;
 
-  /** Estado del intento en curso, para poder replegarse. */
-  private activeMethod: CaptureMethod = 'ddagrab';
-  private triedFallback = false;
+  /** Metodo de captura en uso, decidido por el sondeo automatico. */
+  private activeCandidate: CaptureCandidate = { method: 'ddagrab', outputIndex: 0 };
   private pendingRequest: StartRecordingRequest | null = null;
   private pendingArgsContext: { encoder: string; width: number; height: number } | null = null;
+  private verifyTimer: NodeJS.Timeout | null = null;
+
+  /**
+   * Metodo que funciono la ultima vez, por juego.
+   *
+   * Es lo que hace que solo haya que sondear una vez: a partir de la segunda
+   * partida con el mismo juego se arranca directamente con lo que ya sirvio.
+   */
+  private readonly learned = new Map<string, CaptureCandidate>();
 
   async probe(): Promise<RecorderCapabilities> {
     this.ffmpegPath = resolveFfmpegPath();
@@ -180,6 +143,7 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
 
     const displays = screen.getAllDisplays();
     const primaryId = screen.getPrimaryDisplay().id;
+    this.monitorCount = Math.max(1, displays.length);
 
     return {
       available: true,
@@ -282,10 +246,18 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
     this.lastOutTimeMs = 0;
     this.firstFrameSeen = false;
     this.stopping = false;
-    this.triedFallback = false;
-    this.activeMethod = this.supportsDdagrab ? 'ddagrab' : 'gdigrab';
 
-    this.launch(this.activeMethod);
+    // Se decide COMO capturar antes de empezar, no despues de descubrir que el
+    // video salio en negro. Dura poco mas de un segundo la primera vez y nada
+    // las siguientes, porque el resultado se recuerda por juego.
+    const candidate = await this.chooseCandidate(request);
+    if (!candidate) {
+      throw new Error(this.lastProbeFailure ?? 'No se ha podido capturar la pantalla.');
+    }
+    this.activeCandidate = candidate;
+
+    this.launch(candidate);
+    this.scheduleVerification();
 
     return {
       filePath: this.currentFilePath,
@@ -295,33 +267,102 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
     };
   }
 
-  /** Lanza el proceso de FFmpeg con el metodo de captura indicado. */
-  private launch(method: CaptureMethod): void {
+  /**
+   * Determina el metodo de captura para esta grabacion.
+   *
+   * Con un juego identificado se reutiliza lo aprendido; si no, se sondea. El
+   * sondeo prueba la captura por GPU en cada monitor y, como ultimo recurso, la
+   * captura por CPU, quedandose con el primero que devuelva imagen real.
+   */
+  private async chooseCandidate(
+    request: StartRecordingRequest,
+  ): Promise<CaptureCandidate | null> {
+    const memoryKey = request.gameProcessName ?? 'desktop';
+    const remembered = this.learned.get(memoryKey) ?? null;
+
+    const run = createProbeRunner(this.ffmpegPath as string);
+    const candidates = buildCandidates(this.monitorCount, this.supportsDdagrab === true);
+    const { candidate, attempts } = await selectCapture(run, candidates, remembered);
+
+    if (!candidate) {
+      this.lastProbeFailure = explainFailure(attempts);
+      log.error(this.lastProbeFailure);
+      return null;
+    }
+
+    this.lastProbeFailure = null;
+    this.learned.set(memoryKey, candidate);
+    return candidate;
+  }
+
+  /**
+   * Comprueba una vez, ya empezada la grabacion, que se sigue viendo algo.
+   *
+   * Cubre el caso de que el juego cambie a pantalla completa exclusiva despues
+   * de arrancar. No se reinicia la grabacion (perderia continuidad y el ancla
+   * del reloj); se avisa, que es lo util.
+   */
+  private scheduleVerification(): void {
+    this.clearVerification();
+    this.verifyTimer = setTimeout(() => {
+      void this.verifyStillVisible();
+    }, VERIFY_AFTER_MS);
+  }
+
+  private async verifyStillVisible(): Promise<void> {
+    if (!this.proc || this.stopping || !this.ffmpegPath) return;
+    try {
+      const run = createProbeRunner(this.ffmpegPath);
+      const result = await probeCandidate(run, this.activeCandidate);
+      if (result.usable) return;
+
+      log.warn(
+        `La captura ha dejado de mostrar imagen (${describeCandidate(this.activeCandidate)})`,
+      );
+      this.emit('capture-blank', {
+        message:
+          'La grabacion en curso ha dejado de captar imagen. Si el juego ha cambiado a ' +
+          'pantalla completa exclusiva, ponlo en "Pantalla completa sin bordes".',
+      });
+    } catch {
+      /* la verificacion es un extra: nunca debe afectar a la grabacion */
+    }
+  }
+
+  private clearVerification(): void {
+    if (this.verifyTimer) {
+      clearTimeout(this.verifyTimer);
+      this.verifyTimer = null;
+    }
+  }
+
+  /** Lanza el proceso de FFmpeg con el metodo de captura elegido. */
+  private launch(candidate: CaptureCandidate): void {
     const request = this.pendingRequest;
     const context = this.pendingArgsContext;
     if (!request || !context || !this.ffmpegPath || !this.currentFilePath) return;
 
     const args = buildFfmpegArgs(
-      method,
+      candidate.method,
       {
         encoder: context.encoder,
         width: context.width,
         height: context.height,
         fps: request.settings.fps,
         bitrateKbps: request.settings.bitrate,
+        outputIndex: candidate.outputIndex,
       },
       this.currentFilePath,
     );
     log.info(
-      `Lanzando FFmpeg (${method}) con ${context.encoder} a ` +
+      `Lanzando FFmpeg (${describeCandidate(candidate)}) con ${context.encoder} a ` +
         `${context.width}x${context.height}@${request.settings.fps}`,
     );
 
     const proc = spawn(this.ffmpegPath, args, { windowsHide: true });
     this.proc = proc;
-    this.activeMethod = method;
+    this.activeCandidate = candidate;
     this.startedAtEpochMs = Date.now();
-    const launchedAt = Date.now();
 
     proc.stdout?.on('data', (chunk: Buffer) => this.parseProgress(chunk.toString()));
     proc.stderr?.on('data', (chunk: Buffer) => {
@@ -338,24 +379,7 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
     proc.on('close', (code) => {
       const wasStopping = this.stopping;
       this.proc = null;
-
-      // Arranque fallido con ddagrab: se reintenta con gdigrab en silencio.
-      const failedStartup =
-        !wasStopping &&
-        !this.firstFrameSeen &&
-        Date.now() - launchedAt < STARTUP_GRACE_MS &&
-        method === 'ddagrab' &&
-        !this.triedFallback;
-
-      if (failedStartup) {
-        this.triedFallback = true;
-        log.warn(
-          'La captura por GPU (ddagrab) no ha producido imagen en esta maquina; ' +
-            'se reintenta con gdigrab',
-        );
-        this.launch('gdigrab');
-        return;
-      }
+      this.clearVerification();
 
       const durationMs = this.lastOutTimeMs || null;
       // No conocemos el instante exacto del primer frame, pero si el momento de
@@ -394,7 +418,7 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
         const frames = Number(value);
         if (Number.isFinite(frames) && frames > 0) {
           this.firstFrameSeen = true;
-          log.info(`Primer fotograma capturado con ${this.activeMethod}`);
+          log.info(`Primer fotograma capturado con ${describeCandidate(this.activeCandidate)}`);
           this.emit('backend-started', { filePath: this.currentFilePath });
         }
       }
@@ -457,6 +481,7 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
   }
 
   dispose(): void {
+    this.clearVerification();
     if (this.proc) {
       try {
         this.proc.kill();

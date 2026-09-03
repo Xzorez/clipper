@@ -35,6 +35,19 @@ describe('buildFfmpegArgs', () => {
       expect(valueAfter(args, '-filter_complex')).toContain('framerate=60');
     });
 
+    it('captura el monitor 0 cuando no se indica otro', () => {
+      expect(valueAfter(args, '-filter_complex')).toContain('output_idx=0');
+    });
+
+    /**
+     * Con varias pantallas, dar por hecho la primera grabaria la equivocada si
+     * el juego esta en la otra. El indice lo decide el sondeo automatico.
+     */
+    it('captura el monitor indicado', () => {
+      const otro = buildFfmpegArgs('ddagrab', { ...context, outputIndex: 1 }, 'x.mp4');
+      expect(valueAfter(otro, '-filter_complex')).toContain('output_idx=1');
+    });
+
     it('no dibuja el cursor', () => {
       expect(valueAfter(args, '-filter_complex')).toContain('draw_mouse=0');
     });

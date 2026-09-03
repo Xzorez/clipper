@@ -228,7 +228,7 @@ que los toca está en `ValorantLocalAuth` y `ValorantMatchApi`.
 | Eventos sin Overwolf | **API local de Riot** (LoL), **parser de repeticiones** (R6) e **historial de partidas** (VALORANT) | Fuentes que exponen los propios juegos, sin intermediarios. |
 | Base de datos | **`node:sqlite`** | SQLite real integrado en Node 24. Sin módulos nativos ni `electron-rebuild`. |
 | Clips y miniaturas | **FFmpeg** | Recorte por copia de flujos, sin recodificar. |
-| Tests | **Vitest** | 298 tests, incluidos de integración real con FFmpeg. |
+| Tests | **Vitest** | 326 tests, incluidos de integración real con FFmpeg. |
 
 ### Por qué `node:sqlite` y no `better-sqlite3`
 
@@ -333,6 +333,58 @@ después de la acción, se sube el valor.
 
 ---
 
+## 4 bis. Pantalla completa exclusiva y pantallas en negro
+
+Es el problema clásico de cualquier grabador, y la razón por la que mucha gente acaba con vídeos en
+negro sin saber por qué. Clipper lo resuelve solo.
+
+### Por qué pasa
+
+Un juego en **pantalla completa exclusiva** presenta los fotogramas directamente a la pantalla y se
+salta la composición del escritorio de Windows. Cuando eso ocurre no hay superficie compuesta que
+capturar desde fuera.
+
+Lo verifiqué antes de decidir nada, y el panorama real es este:
+
+- **Desktop Duplication** (`ddagrab`) **sí** captura aplicaciones DirectX 11.1 o superior en modo
+  exclusivo, *salvo* que la aplicación se excluya expresamente.
+- **Windows Graphics Capture**, la API moderna, **tampoco** garantiza el modo exclusivo: funciona
+  bien con pantalla completa sin bordes, igual que la anterior.
+- Lo único totalmente fiable es la **captura de juego**, que engancha el propio proceso. Es lo que
+  hacen OBS y el grabador de Overwolf, y es justo lo que este proyecto no va a hacer por su cuenta:
+  implica inyectar en el proceso del juego, que es la línea que no se cruza.
+
+O sea: con Overwolf tienes captura de juego y el problema no existe. Sin Overwolf hay un caso
+residual, los juegos que se excluyen del modo exclusivo, en el que ninguna captura externa funciona.
+
+### Qué hace Clipper
+
+**Sondeo automático antes de grabar.** Se captura poco más de un segundo con cada método candidato
+y se mide el brillo medio de la imagen. El negro puro vale exactamente 16 en rango limitado, así que
+un resultado en ese entorno significa que no se está viendo nada. Se elige el primer método que
+devuelve imagen real.
+
+Esto resuelve de paso un fallo silencioso distinto y más común: **grabar el monitor equivocado**.
+Con dos pantallas, dar por hecho la primera significa grabar el escritorio mientras juegas en la
+otra. El sondeo prueba todos los monitores, así que da igual dónde tengas el juego.
+
+**Se recuerda por juego.** El método que funcionó se guarda, de modo que solo se sondea la primera
+vez. A partir de ahí la grabación arranca sin espera.
+
+**Verificación durante la grabación.** A los doce segundos se comprueba que se sigue viendo algo,
+por si el juego ha cambiado a modo exclusivo después de empezar. Si deja de verse, se avisa; no se
+reinicia la grabación, porque perder la continuidad y el anclaje del reloj sería peor que el aviso.
+
+**Un único mensaje accionable si nada funciona.** En ese caso —el juego se excluye de la captura—
+Clipper dice exactamente qué hacer: cambiar en las opciones del juego a *pantalla completa sin
+bordes*. Es un ajuste del juego, no de Clipper, y a partir de ahí no hay que volver a tocar nada.
+
+### Lo que no se hace, y por qué
+
+No se inyecta en el proceso del juego para conseguir captura de juego propia. Sería la solución
+técnicamente completa, pero es exactamente el tipo de cosa que un anticheat mira con lupa. Prefiero
+un caso residual sin cubrir a poner en riesgo tu cuenta.
+
 ## 5. Seguridad y anti-cheat
 
 Clipper **no hace** ninguna de estas cosas:
@@ -400,9 +452,11 @@ npm start
 
 Qué funciona en este modo:
 
-- **Grabación de vídeo**: sí, con FFmpeg. Usa `ddagrab` (Desktop Duplication por GPU) cuando está
-  disponible, con repliegue automático a `gdigrab` si falla. Codificación por NVENC / AMF /
-  Quick Sync igualmente.
+- **Grabación de vídeo**: sí, con FFmpeg, y sin configurar nada. Al empezar la primera grabación
+  de cada juego, Clipper prueba en menos de dos segundos cómo capturar: `ddagrab` (por GPU) en cada
+  monitor y, como último recurso, `gdigrab` (por CPU). Se queda con el primero que devuelve imagen
+  real y lo recuerda, así que a partir de la segunda partida arranca al instante. Codificación por
+  NVENC / AMF / Quick Sync igualmente.
 - **League of Legends**: marcadores completos vía la API local de Riot.
 - **VALORANT y Rainbow Six Siege**: se graban, pero sin marcadores automáticos. La interfaz lo
   avisa con un banner explícito en Inicio. Puedes marcar momentos a mano con F9.
@@ -589,7 +643,7 @@ La base de datos SQLite vive en `%APPDATA%\clipper\clipper.db` con las tablas `r
 
 ## 9. Tests
 
-298 tests en 14 ficheros. Los 15 escenarios que pediste, con su ubicación:
+326 tests en 15 ficheros. Los 15 escenarios que pediste, con su ubicación:
 
 | # | Escenario | Fichero |
 |---|---|---|
@@ -616,6 +670,7 @@ Ficheros adicionales:
 | `riotLiveClient.test.ts` | Proveedor nativo de LoL: detección, deduplicado por `EventID`, traducción de kill/muerte/asistencia, precisión temporal, fin de partida y cadena completa hasta el marcador |
 | `ffmpegArgs.test.ts` | Argumentos de `ddagrab` y `gdigrab`, intervalo de keyframes y flags de resistencia a cortes |
 | `r6Replay.test.ts` | Parser de repeticiones de R6: cabecera, descompresión por tramas con huecos, extracción de kills/headshots/muertes, deduplicado, ficheros corruptos y cadena completa hasta el marcador |
+| `captureProbe.test.ts` | Sondeo automático de captura: medida de brillo, orden de candidatos con varios monitores, detección de imagen en negro y mensaje accionable |
 | `valorantMatchApi.test.ts` | Vía nativa de VALORANT: lectura del lockfile y del registro del juego, extracción de kills/muertes/asistencias con instante absoluto, deduplicado, renovación de credenciales y cadena completa hasta el marcador |
 
 `clips.test.ts` es una prueba de integración real: genera un vídeo con FFmpeg, recorta un clip y
@@ -638,7 +693,8 @@ src/
                                  ValorantMatchProvider (VALORANT sin Overwolf)
     detection/         GameDetectionService (máquina de estados), ProcessWatcher
     recording/         RecordingManager, ScreenRecorder, OverwolfRecorder,
-                       FFmpegRecorder, RecorderProxy, DiskSpaceGuard, SidecarStore
+                       FFmpegRecorder, RecorderProxy, CaptureProbe, captureArgs,
+                       DiskSpaceGuard, SidecarStore
     database/          Database (node:sqlite)
     services/          Settings, Thumbnail, Clip, Hotkey, Recovery
     logging/           Logger estructurado por subsistema
@@ -646,7 +702,7 @@ src/
   preload/             Puente con contextIsolation
   renderer/            React: páginas, componentes (Timeline, VideoPlayer), estilos
   shared/              Tipos, canales IPC, contrato de API, lógica de timeline
-tests/                 298 tests
+tests/                 326 tests
   helpers/             Generador de repeticiones .rec sintéticas
 ```
 
@@ -701,10 +757,11 @@ resumen de partida, configuración, atajos globales, recuperación tras cierre y
 - **La distribución exige doble firma** (Overwolf + certificado de código propio).
 - **Un juego elevado sin Clipper elevado** deja sin eventos, sin game capture y sin atajos globales
   mientras el juego tenga el foco. Se avisa y se degrada a captura de pantalla.
-- **El modo FFmpeg captura el escritorio**, no el proceso del juego. Con `ddagrab` la captura ocurre
-  en la GPU y se comporta bien a pantalla completa, pero sigue sin poder aislar la ventana del juego:
-  para eso hace falta ow-electron. Si `ddagrab` falla en tu equipo (multi-GPU, sesión remota,
-  drivers antiguos) se repliega solo a `gdigrab`, que consume más CPU.
+- **El modo FFmpeg captura la pantalla**, no el proceso del juego. El sondeo automático elige el
+  monitor y el método correctos, pero hay un caso que ninguna captura externa cubre: un juego en
+  pantalla completa exclusiva que se excluya expresamente de ser capturado. Ahí la única solución
+  es ponerlo en pantalla completa sin bordes, y Clipper lo dice con esas palabras. Con el grabador
+  de Overwolf el caso no se da, porque engancha el proceso del juego.
 - **Los clips por copia de flujos se alinean al keyframe anterior** (máximo 2 s antes, nunca después).
   Es un compromiso deliberado: recorte instantáneo y sin pérdida de calidad, a cambio de un poco más
   de contexto previo. Si la copia falla, se recodifica con corte exacto.

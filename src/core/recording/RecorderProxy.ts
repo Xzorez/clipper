@@ -83,6 +83,7 @@ export class RecorderProxy extends EventEmitter implements ScreenRecorder {
     recorder.on('backend-stopped', (payload) => this.emit('backend-stopped', payload));
     recorder.on('stats', (payload) => this.emit('stats', payload));
     recorder.on('error', (payload) => this.emit('error', payload));
+    recorder.on('capture-blank', (payload) => this.emit('capture-blank', payload));
   }
 
   private async active(): Promise<ScreenRecorder> {

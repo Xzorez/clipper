@@ -267,7 +267,12 @@ describe('RecordingManager', () => {
     expect(warnings.some((w) => w.title.includes('no se ha guardado'))).toBe(true);
   });
 
-  it('informa con un mensaje util si no se puede arrancar la captura', async () => {
+  /**
+   * El grabador ya explica la causa concreta cuando la conoce (por ejemplo, la
+   * pantalla completa exclusiva). Ese mensaje debe llegar al usuario intacto,
+   * sin diluirlo con texto generico.
+   */
+  it('deja pasar intacto el motivo por el que no se pudo arrancar', async () => {
     recorder.failOnStart = true;
     const warnings: Array<{ title: string; message: string }> = [];
     manager.on('warning', (w) => warnings.push(w));
@@ -277,7 +282,7 @@ describe('RecordingManager', () => {
     expect(active).toBeNull();
     expect(manager.isRecording).toBe(false);
     expect(warnings[0].title).toContain('No se ha podido iniciar');
-    expect(warnings[0].message).toContain('espacio disponible');
+    expect(warnings[0].message).toBe('el codificador no esta disponible');
   });
 
   it('se niega a grabar si no hay espacio suficiente', async () => {
