@@ -10,7 +10,7 @@ muestra kills, muertes, headshots y asistencias, y un clic en cualquier marcador
 
 ## 0. Instalación
 
-Descarga `Clipper-Setup-x.y.z.exe` de la última release y ábrelo. Se instala en un clic y crea el
+Descarga `Clipper-Setup-x.y.z.exe` de [la última release](https://github.com/Xzorez/clipper/releases/latest) y ábrelo. Se instala en un clic y crea el
 acceso directo. **No hay nada que configurar**: al abrirla ya está vigilando los juegos.
 
 Windows mostrará un aviso de SmartScreen la primera vez, porque el instalador no está firmado con
@@ -726,19 +726,21 @@ actual y, si hay una descargándose, su progreso.
 Se apaga sola cuando la aplicación no está empaquetada, y un fallo de red o una configuración
 incompleta solo dejan una línea en el registro, nunca un aviso al usuario.
 
-### Configurar el repositorio
+### Publicar una version nueva
 
-En `package.json`, dentro de `build.publish`, cambia `owner` por tu usuario de GitHub. Como el
-repositorio es privado, publicar y actualizar necesitan un token personal de GitHub con permiso
-`repo`:
+El repositorio es publico, asi que las copias instaladas se actualizan solas sin necesitar ningun
+token. Publicar si lo necesita, porque escribe en GitHub:
 
 ```bash
-setx GH_TOKEN "tu-token"
+npm version patch
 npm run release
 ```
 
-Eso sube el instalador y el `latest.yml` a una release nueva, que es lo que las copias ya
-instaladas consultan para actualizarse.
+Eso sube el instalador, el `latest.yml` y el `.blockmap` a una release nueva. Las copias ya
+instaladas la detectan en su siguiente comprobacion y se actualizan al cerrarse.
+
+El `.blockmap` permite actualizaciones diferenciales: en vez de bajar los 127 MB enteros, solo se
+descarga lo que ha cambiado.
 
 ---
 
