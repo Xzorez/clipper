@@ -82,7 +82,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "CAMBIA-ESTO-POR-TU-USUARIO",
+        "owner": "Xzorez",
         "repo": "clipper",
         "private": true,
         "releaseType": "release"
