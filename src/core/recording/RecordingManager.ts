@@ -24,6 +24,15 @@ const log = createLogger('Recording');
 /** Cada cuanto se vuelca el sidecar a disco durante la grabacion. */
 const SIDECAR_FLUSH_INTERVAL_MS = 15_000;
 
+/** Datos necesarios para arrancar una grabacion. */
+export interface StartParams {
+  adapter: GameAdapter;
+  settings: AppSettings;
+  gamePid?: number;
+  gameProcessName?: string;
+  gameIsElevated?: boolean;
+}
+
 export interface ActiveRecording {
   id: string;
   game: GameKey;
@@ -61,6 +70,8 @@ export class RecordingManager extends EventEmitter {
   private readonly thumbnails: ThumbnailService;
 
   private active: ActiveRecording | null = null;
+  /** Arranque en curso que aun no ha fijado `active`. Ver `start()`. */
+  private startInFlight: Promise<ActiveRecording | null> | null = null;
   private flushTimer: NodeJS.Timeout | null = null;
   private stopping = false;
   private anchoredResolver: (() => void) | null = null;
@@ -187,19 +198,33 @@ export class RecordingManager extends EventEmitter {
 
   /**
    * Inicia una grabacion. Devuelve null si no se pudo (con motivo emitido).
+   *
+   * `this.active` no se fija hasta despues de comprobar el disco y arrancar el
+   * grabador, varios segundos mas tarde. Comprobarlo a secas dejaria una
+   * ventana en la que dos llamadas simultaneas arrancarian dos capturas sobre
+   * la misma ruta, asi que se memoriza la promesa del arranque, no su
+   * resultado: quien llegue durante esa ventana espera al mismo arranque y
+   * recibe la misma grabacion, en lugar de un null que pareceria un fallo.
    */
-  async start(params: {
-    adapter: GameAdapter;
-    settings: AppSettings;
-    gamePid?: number;
-    gameProcessName?: string;
-    gameIsElevated?: boolean;
-  }): Promise<ActiveRecording | null> {
+  async start(params: StartParams): Promise<ActiveRecording | null> {
     if (this.active) {
       log.warn('Ya hay una grabacion en curso');
       return this.current;
     }
+    if (this.startInFlight) {
+      log.warn('Ya hay una grabacion arrancando; se comparte el arranque en curso');
+      return this.startInFlight;
+    }
+    const run = this.runStart(params);
+    this.startInFlight = run;
+    try {
+      return await run;
+    } finally {
+      this.startInFlight = null;
+    }
+  }
 
+  private async runStart(params: StartParams): Promise<ActiveRecording | null> {
     const { adapter, settings } = params;
     const folder = settings.recording.outputFolder;
 
@@ -223,7 +248,9 @@ export class RecordingManager extends EventEmitter {
     }
 
     const id = randomUUID();
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    // Con resolucion de segundos, dos arranques en el mismo segundo generan la
+    // misma ruta. Los milisegundos hacen imposible la colision.
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23);
     const outputBase = join(folder, `${adapter.game}_${stamp}`);
 
     this.recordingClock.reset();

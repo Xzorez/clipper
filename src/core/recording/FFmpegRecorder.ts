@@ -111,6 +111,16 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
   private lastOutTimeMs = 0;
   private firstFrameSeen = false;
   private stopping = false;
+  /**
+   * Hay un arranque en curso que todavia no ha llegado a lanzar el proceso.
+   *
+   * `this.proc` no sirve como guardia por si solo: entre la comprobacion y el
+   * `spawn` hay un sondeo de captura que tarda segundos. Dos llamadas a
+   * `start()` en ese intervalo pasarian ambas el filtro y dejarian dos FFmpeg
+   * escribiendo el mismo fichero, con el agravante de que solo el ultimo
+   * quedaria en `this.proc`: el otro seria un huerfano imposible de detener.
+   */
+  private starting = false;
 
   /** Metodo de captura en uso, decidido por el sondeo automatico. */
   private activeCandidate: CaptureCandidate = { method: 'ddagrab', outputIndex: 0 };
@@ -224,7 +234,18 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
   }
 
   async start(request: StartRecordingRequest): Promise<StartRecordingResult> {
-    if (this.proc) throw new Error('Ya hay una grabacion en curso');
+    if (this.proc || this.starting) throw new Error('Ya hay una grabacion en curso');
+    // Se marca de forma sincrona, antes de cualquier await, para que la ventana
+    // entre la comprobacion y el spawn deje de ser aprovechable.
+    this.starting = true;
+    try {
+      return await this.runStart(request);
+    } finally {
+      this.starting = false;
+    }
+  }
+
+  private async runStart(request: StartRecordingRequest): Promise<StartRecordingResult> {
     if (!this.ffmpegPath) await this.probe();
     if (!this.ffmpegPath) throw new Error('FFmpeg no disponible');
 
@@ -360,6 +381,21 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
       `Lanzando FFmpeg (${describeCandidate(candidate)}) con ${context.encoder} a ` +
         `${context.width}x${context.height}@${request.settings.fps}`,
     );
+
+    // Ultima red: si por cualquier via quedara un proceso anterior vivo, se
+    // termina antes de lanzar el nuevo. Dos FFmpeg sobre el mismo fichero lo
+    // dejan irrecuperable, y el que se pierde de vista no lo para nadie.
+    if (this.proc) {
+      log.error(
+        'Se iba a lanzar FFmpeg con una captura ya en curso; se termina la anterior ' +
+          'para no dejar dos procesos escribiendo el mismo fichero',
+      );
+      try {
+        this.proc.kill('SIGKILL');
+      } catch {
+        /* ignorado */
+      }
+    }
 
     const proc = spawn(this.ffmpegPath, args, { windowsHide: true });
     this.proc = proc;

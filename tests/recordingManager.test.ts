@@ -46,8 +46,14 @@ class FakeRecorder extends EventEmitter implements ScreenRecorder {
     return this.filePath !== '';
   }
 
+  /** Simula lo que tarda de verdad el sondeo de captura antes del spawn. */
+  startDelayMs = 0;
+
   async start(request: StartRecordingRequest): Promise<StartRecordingResult> {
     this.startCalls.push(request);
+    if (this.startDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.startDelayMs));
+    }
     if (this.failOnStart) throw new Error('el codificador no esta disponible');
     this.filePath = request.outputPathWithoutExt + '.mp4';
     return {
@@ -147,6 +153,46 @@ describe('RecordingManager', () => {
     writeFileSync(path, Buffer.alloc(50_000));
     return path;
   }
+
+  /**
+   * Regresion: dos detecciones simultaneas no pueden abrir dos capturas.
+   *
+   * El mismo juego lo anuncian hasta tres fuentes independientes (GEP, el
+   * vigilante de procesos y la API local de Riot) con milisegundos de
+   * diferencia. Cuando el guardia era `if (this.active)` sin mas, ambas lo
+   * cruzaban durante los segundos que tarda el arranque y acababan lanzando dos
+   * FFmpeg contra la misma ruta: el fichero quedaba ilegible y uno de los dos
+   * procesos se perdia de vista, siguiendo a grabar indefinidamente.
+   */
+  it('ignora un segundo arranque lanzado mientras el primero esta en curso', async () => {
+    recorder.startDelayMs = 30;
+    const adapter = new ValorantAdapter();
+
+    const [first, second] = await Promise.all([
+      manager.start({ adapter, settings }),
+      manager.start({ adapter, settings }),
+    ]);
+
+    expect(recorder.startCalls).toHaveLength(1);
+    expect(db.listRecordings()).toHaveLength(1);
+    // La segunda llamada no arranca nada nuevo, pero tampoco miente: devuelve
+    // la grabacion que ya existe.
+    expect(first?.id).toBeDefined();
+    expect(second?.id).toBe(first?.id);
+  });
+
+  it('da rutas distintas a dos grabaciones consecutivas del mismo segundo', async () => {
+    const adapter = new ValorantAdapter();
+    await manager.start({ adapter, settings });
+    materializeVideo();
+    await manager.stop();
+    await manager.start({ adapter, settings });
+
+    expect(recorder.startCalls).toHaveLength(2);
+    expect(recorder.startCalls[1].outputPathWithoutExt).not.toBe(
+      recorder.startCalls[0].outputPathWithoutExt,
+    );
+  });
 
   it('inicia una grabacion y la registra en la base de datos', async () => {
     const active = await manager.start({ adapter: new ValorantAdapter(), settings });

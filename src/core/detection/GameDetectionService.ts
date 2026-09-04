@@ -62,6 +62,8 @@ export class GameDetectionService extends EventEmitter {
   private activeIsElevated = false;
   private elevationRequired = false;
   private lastError: string | null = null;
+  /** Arranque de grabacion en curso, compartido por todas las detecciones. */
+  private beginInFlight: Promise<boolean> | null = null;
   private stopTimer: NodeJS.Timeout | null = null;
   private gepUsable = false;
 
@@ -243,7 +245,16 @@ export class GameDetectionService extends EventEmitter {
     processName: string | undefined,
   ): Promise<void> {
     // Ya estamos con este juego: nada que hacer.
-    if (this.activeAdapter?.game === adapter.game && this.state === DetectionState.RECORDING) {
+    //
+    // Exigir RECORDING no basta. El estado no pasa a RECORDING hasta el final
+    // de beginRecording(), y hasta entonces sigue en GAME_DETECTED: una segunda
+    // deteccion que llegue durante el arranque atravesaria el filtro. Y llegan,
+    // porque hay hasta tres fuentes independientes (GEP, vigilante de procesos
+    // y la API local de Riot) que detectan el mismo juego casi a la vez.
+    if (
+      this.activeAdapter?.game === adapter.game &&
+      (this.state === DetectionState.RECORDING || this.state === DetectionState.GAME_DETECTED)
+    ) {
       return;
     }
 
@@ -284,8 +295,24 @@ export class GameDetectionService extends EventEmitter {
     await this.beginRecording();
   }
 
-  /** Arranca la grabacion para el juego activo. */
+  /**
+   * Arranca la grabacion para el juego activo.
+   *
+   * Las llamadas concurrentes comparten el mismo arranque en lugar de iniciar
+   * uno cada una: se memoriza la promesa, no el resultado.
+   */
   async beginRecording(): Promise<boolean> {
+    if (this.beginInFlight) return this.beginInFlight;
+    const run = this.runBeginRecording();
+    this.beginInFlight = run;
+    try {
+      return await run;
+    } finally {
+      this.beginInFlight = null;
+    }
+  }
+
+  private async runBeginRecording(): Promise<boolean> {
     if (!this.activeAdapter) {
       this.lastError = 'No hay ningun juego detectado que grabar.';
       this.emitChange();
