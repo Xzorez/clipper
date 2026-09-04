@@ -1,6 +1,6 @@
-import { app, BrowserWindow, protocol, net, shell } from 'electron';
+import { app, BrowserWindow, protocol, shell } from 'electron';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { serveLocalFile } from './rangeRequest';
 import { AppContext } from './AppContext';
 import { registerIpcHandlers } from './ipc/handlers';
 import { loggerRoot, createLogger } from '../core/logging/Logger';
@@ -72,18 +72,30 @@ function createWindow(): void {
   });
 }
 
-/** Sirve ficheros locales de forma controlada al renderer. */
+/**
+ * Sirve ficheros locales de forma controlada al renderer.
+ *
+ * Se atienden las peticiones de rango en lugar de devolver siempre el fichero
+ * entero. Sin eso Chromium no puede saltar dentro del video, y saltar al
+ * instante exacto de un evento es justo lo que hace esta aplicacion. Con
+ * grabaciones de mas de un giga, ademas, mandar el fichero completo para ver
+ * un segundo concreto no es una opcion.
+ */
 function registerMediaProtocol(): void {
-  protocol.handle('clipper-media', (request) => {
+  protocol.handle('clipper-media', async (request) => {
     try {
       const url = new URL(request.url);
-      const raw = decodeURIComponent(url.hostname + url.pathname);
-      const filePath = raw.replace(/^\/+/, '');
+      // Cuenta solo el pathname. El host ('local') es relleno para que la URL
+      // sea valida con un esquema estandar; concatenarlo a la ruta la deja
+      // inservible y todo acaba en un 403.
+      const filePath = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+
       if (!context?.isPathAllowed(filePath)) {
         log.warn(`Acceso denegado a ${filePath}`);
         return new Response('Forbidden', { status: 403 });
       }
-      return net.fetch(pathToFileURL(filePath).toString());
+
+      return serveLocalFile(filePath, request.headers.get('Range'));
     } catch (err) {
       log.error(`Error sirviendo media: ${(err as Error).message}`);
       return new Response('Not found', { status: 404 });
