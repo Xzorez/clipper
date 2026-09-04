@@ -112,23 +112,23 @@ export function Timeline({
   return (
     <div>
       <div
-        className="timeline-track-wrap"
+        className="tl__wrap"
         ref={wrapRef}
         onScroll={(e) => setScrollLeft(e.currentTarget.scrollLeft)}
       >
         <div
-          className="timeline-track"
+          className="tl__track"
           style={{ width: trackWidth }}
           onClick={handleTrackClick}
         >
-          <div className="timeline-rail">
+          <div className="tl__rail">
             <div
-              className="timeline-rail__progress"
+              className="tl__fill"
               style={{ width: `${(Math.min(currentTime, safeDuration) / safeDuration) * 100}%` }}
             />
           </div>
 
-          <div className="timeline-playhead" style={{ left: playheadX }} />
+          <div className="tl__head-line" style={{ left: playheadX }} />
 
           {renderedClusters.map((cluster) => (
             <Marker
@@ -142,9 +142,9 @@ export function Timeline({
           ))}
         </div>
 
-        <div className="timeline-ruler" style={{ width: trackWidth, position: 'relative' }}>
+        <div className="ruler" style={{ width: trackWidth, position: 'relative' }}>
           {ticks.map((tick) => (
-            <span key={tick.time} className="timeline-tick" style={{ left: tick.x }}>
+            <span key={tick.time} className="tick" style={{ left: tick.x }}>
               {formatTime(tick.time)}
             </span>
           ))}
@@ -152,7 +152,7 @@ export function Timeline({
       </div>
 
       <div
-        className="zoom-controls"
+        className="zoom"
         style={{ marginTop: 10, justifyContent: 'flex-end' }}
       >
         <span>
@@ -160,7 +160,7 @@ export function Timeline({
           {clusters.length !== visibleEvents.length && ` en ${clusters.length} grupos`}
         </span>
         <button
-          className="btn btn--sm btn--ghost"
+          className="btn btn--sm btn--quiet"
           onClick={() => setZoom((z) => Math.max(1, z - 1))}
           disabled={zoom <= 1}
           title="Alejar"
@@ -169,7 +169,7 @@ export function Timeline({
         </button>
         <span style={{ minWidth: 34, textAlign: 'center' }}>{zoom}x</span>
         <button
-          className="btn btn--sm btn--ghost"
+          className="btn btn--sm btn--quiet"
           onClick={() => setZoom((z) => Math.min(20, z + 1))}
           disabled={zoom >= 20}
           title="Acercar"
@@ -197,7 +197,7 @@ function Marker({ cluster, size, showLabel, onSeek, onHover }: MarkerProps) {
 
   return (
     <button
-      className={`marker marker--${size}${isCluster ? ' marker--cluster' : ''}`}
+      className={`mk mk--${size}${isCluster ? ' mk--group' : ''}`}
       style={{
         left: cluster.x,
         background: isCluster ? undefined : visual.color,
@@ -214,7 +214,7 @@ function Marker({ cluster, size, showLabel, onSeek, onHover }: MarkerProps) {
       onMouseLeave={() => onHover(null)}
       aria-label={`${visual.label} en ${formatTime(cluster.time)}`}
     >
-      {isCluster ? cluster.events.length : showLabel ? '' : visual.icon}
+      {isCluster ? cluster.events.length : null}
     </button>
   );
 }
@@ -223,16 +223,14 @@ function Tooltip({ cluster, x, y }: { cluster: Cluster; x: number; y: number }) 
   const lines = cluster.events.slice(0, 6);
   return (
     <div
-      className="marker-tooltip"
+      className="tip"
       style={{ left: x, top: y - 12, transform: 'translate(-50%, -100%)' }}
     >
       {lines.map((event) => {
         const visual = EVENT_VISUALS[event.type];
         return (
           <div key={event.id}>
-            <span style={{ color: visual.color, fontWeight: 700 }}>
-              {visual.icon} {visual.label}
-            </span>
+            <span style={{ color: visual.color, fontWeight: 600 }}>{visual.label}</span>
             {' — '}
             {formatTimePrecise(event.videoTime)}
             {renderMeta(event)}
@@ -240,7 +238,7 @@ function Tooltip({ cluster, x, y }: { cluster: Cluster; x: number; y: number }) 
         );
       })}
       {cluster.events.length > lines.length && (
-        <div className="marker-tooltip__meta">
+        <div className="tip__meta">
           y {cluster.events.length - lines.length} mas
         </div>
       )}
@@ -261,5 +259,5 @@ function renderMeta(event: GameEvent) {
   }
   if (typeof meta.label === 'string' && meta.label !== 'kill') parts.push(String(meta.label));
   if (parts.length === 0) return null;
-  return <span className="marker-tooltip__meta"> · {parts.join(' · ')}</span>;
+  return <span className="tip__meta"> · {parts.join(' · ')}</span>;
 }

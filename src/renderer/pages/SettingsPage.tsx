@@ -22,18 +22,18 @@ const TABS: Array<{ key: Tab; label: string }> = [
 export function SettingsPage({ settings, status, onChange, onNotify }: SettingsPageProps) {
   const [tab, setTab] = useState<Tab>('recording');
 
-  if (!settings) return <div className="empty-state">Cargando configuracion...</div>;
+  if (!settings) return <div className="empty">Cargando configuracion...</div>;
 
   return (
     <div>
-      <h1 className="page-title">Configuracion</h1>
-      <p className="page-subtitle">Los cambios se guardan al instante.</p>
+      <h1 className="page__title">Configuracion</h1>
+      <p className="page__sub">Los cambios se guardan al instante.</p>
 
       <div className="tabs">
         {TABS.map((item) => (
           <button
             key={item.key}
-            className={`tab${tab === item.key ? ' tab--active' : ''}`}
+            className={`tab${tab === item.key ? ' tab--on' : ''}`}
             onClick={() => setTab(item.key)}
           >
             {item.label}
@@ -70,7 +70,7 @@ function RecordingSettings({
 
   return (
     <div className="card">
-      <div className="settings-group">
+      <div className="rows">
         <Row label="Grabacion automatica" hint="Empieza a grabar en cuanto se detecta un juego soportado.">
           <Switch value={r.autoRecord} onChange={(v) => onChange({ recording: { autoRecord: v } })} />
         </Row>
@@ -164,7 +164,7 @@ function RecordingSettings({
         </Row>
 
         <Row label="Carpeta de grabaciones">
-          <span className="path-display" title={r.outputFolder}>
+          <span className="path" title={r.outputFolder}>
             {r.outputFolder}
           </span>
           <button
@@ -178,7 +178,7 @@ function RecordingSettings({
             Cambiar
           </button>
           <button
-            className="btn btn--sm btn--ghost"
+            className="btn btn--sm btn--quiet"
             onClick={() =>
               void api
                 .openPath(r.outputFolder)
@@ -235,7 +235,7 @@ function EventSettings({
   return (
     <>
       <div className="card">
-        <div className="settings-group">
+        <div className="rows">
           <Row label="Detectar kills">
             <Switch value={e.detectKills} onChange={(v) => onChange({ events: { detectKills: v } })} />
           </Row>
@@ -257,7 +257,7 @@ function EventSettings({
         </div>
       </div>
 
-      <div className="section-title">Calibracion de sincronizacion</div>
+      <div className="section">Calibracion de sincronizacion</div>
       <div className="card">
         <p style={{ color: 'var(--text-1)', fontSize: 13, marginTop: 0, lineHeight: 1.6 }}>
           El proveedor de eventos detecta las acciones con un pequeno retraso respecto a lo
@@ -266,7 +266,7 @@ function EventSettings({
           kill el video empieza <em>despues</em> de la accion, sube el valor; si empieza
           demasiado pronto, bajalo.
         </p>
-        <div className="settings-group">
+        <div className="rows">
           {(Object.keys(e.latencyOffsetMs) as GameKey[]).map((game) => (
             <Row
               key={game}
@@ -319,9 +319,9 @@ function EventSettings({
         </div>
       </div>
 
-      <div className="section-title">Juegos vigilados</div>
+      <div className="section">Juegos vigilados</div>
       <div className="card">
-        <div className="settings-group">
+        <div className="rows">
           {(Object.keys(settings.games) as GameKey[]).map((game) => (
             <Row key={game} label={GAME_DISPLAY_NAMES[game]}>
               <Switch
@@ -348,7 +348,7 @@ function InterfaceSettings({
   return (
     <>
       <div className="card">
-        <div className="settings-group">
+        <div className="rows">
           <Row label="Mostrar iconos en la timeline">
             <Switch value={ui.showIcons} onChange={(v) => onChange({ ui: { showIcons: v } })} />
           </Row>
@@ -386,9 +386,9 @@ function InterfaceSettings({
         </div>
       </div>
 
-      <div className="section-title">Clips</div>
+      <div className="section">Clips</div>
       <div className="card">
-        <div className="settings-group">
+        <div className="rows">
           <Row label="Segundos antes del evento">
             <input
               className="input input--narrow"
@@ -432,7 +432,7 @@ function HotkeySettings({
   return (
     <>
       <div className="card">
-        <div className="settings-group">
+        <div className="rows">
           {rows.map((row) => (
             <Row key={row.key} label={row.label} hint={row.hint}>
               <input
@@ -445,18 +445,15 @@ function HotkeySettings({
           ))}
         </div>
       </div>
-      <div className="banner banner--info" style={{ marginTop: 16 }}>
-        <span>ℹ</span>
+      <div className="note" style={{ marginTop: 16 }}>
         <div>
-          <div className="banner__title">Sobre los atajos globales</div>
-          <div className="banner__body">
+          <b>Sobre los atajos globales</b>
             Se registran en el sistema, asi que funcionan con el juego en primer plano, incluso
             a pantalla completa. La unica excepcion es un juego ejecutado como administrador:
             en ese caso Windows bloquea la entrada de procesos sin privilegios y hay que abrir
             Clipper tambien como administrador. Acepta combinaciones como{' '}
             <span className="kbd">F8</span>, <span className="kbd">Ctrl+Shift+S</span> o{' '}
             <span className="kbd">Alt+X</span>.
-          </div>
         </div>
       </div>
     </>
@@ -479,7 +476,7 @@ function Diagnostics({ status }: { status: LiveStatus | null }) {
   return (
     <>
       <div className="card">
-        <div className="settings-group">
+        <div className="rows">
           <Row label="Proveedor de eventos" hint={status?.provider.message ?? ''}>
             <strong>{status?.provider.status ?? 'desconocido'}</strong>
           </Row>
@@ -491,6 +488,16 @@ function Diagnostics({ status }: { status: LiveStatus | null }) {
               {status?.recorder.encoders.map((e) => e.label).join(', ') || 'ninguno'}
             </span>
           </Row>
+          <Row
+            label="Version"
+            hint="Las actualizaciones se descargan solas y se aplican al cerrar la aplicacion."
+          >
+            <span style={{ color: 'var(--text-2)', fontSize: 12 }}>
+              {String(info?.version ?? '...')}
+              {updateLabel(info?.updates as Record<string, unknown> | undefined)}
+            </span>
+          </Row>
+
           {info?.valorant ? <ValorantDiagnostics data={info.valorant as Record<string, unknown>} /> : null}
           {info &&
             Object.entries(info)
@@ -503,13 +510,13 @@ function Diagnostics({ status }: { status: LiveStatus | null }) {
         </div>
       </div>
 
-      <div className="section-title">Registro</div>
-      <div className="log-view">
+      <div className="section">Registro</div>
+      <div className="log">
         {logs.length === 0 ? (
           <div style={{ color: 'var(--text-2)' }}>Sin entradas todavia.</div>
         ) : (
           logs.slice(-250).map((entry, index) => (
-            <div key={index} className={`log-line--${entry.level}`}>
+            <div key={index} className={`log-${entry.level}`}>
               {new Date(entry.time).toLocaleTimeString('es-ES')}{' '}
               <span className="log-tag">[{entry.tag}]</span> {entry.message}
             </div>
@@ -555,6 +562,21 @@ function ValorantDiagnostics({ data }: { data: Record<string, unknown> }) {
   );
 }
 
+/** Estado de la actualizacion, en una linea y sin alarmar. */
+function updateLabel(update: Record<string, unknown> | undefined): string {
+  if (!update) return '';
+  switch (update.state) {
+    case 'downloading':
+      return ` · descargando ${String(update.version ?? '')} (${String(update.progress ?? 0)}%)`;
+    case 'ready':
+      return ` · ${String(update.version)} lista, se aplicara al cerrar`;
+    case 'disabled':
+      return ' · sin empaquetar';
+    default:
+      return '';
+  }
+}
+
 function labelFor(key: string): string {
   const map: Record<string, string> = {
     electron: 'Version de Electron',
@@ -578,12 +600,12 @@ function Row({
   children: React.ReactNode;
 }) {
   return (
-    <div className="setting-row">
-      <div className="setting-row__info">
-        <div className="setting-row__label">{label}</div>
-        {hint && <div className="setting-row__hint">{hint}</div>}
+    <div className="row">
+      <div className="row__info">
+        <div className="row__label">{label}</div>
+        {hint && <div className="row__hint">{hint}</div>}
       </div>
-      <div className="setting-row__control">{children}</div>
+      <div className="row__ctl">{children}</div>
     </div>
   );
 }
@@ -591,12 +613,12 @@ function Row({
 function Switch({ value, onChange }: { value: boolean; onChange: (value: boolean) => void }) {
   return (
     <button
-      className={`switch${value ? ' switch--on' : ''}`}
+      className={`sw${value ? ' sw--on' : ''}`}
       onClick={() => onChange(!value)}
       role="switch"
       aria-checked={value}
     >
-      <span className="switch__knob" />
+      <span className="sw__k" />
     </button>
   );
 }

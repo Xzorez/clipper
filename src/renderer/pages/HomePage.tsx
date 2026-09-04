@@ -2,6 +2,7 @@ import { DetectionState, LiveStatus, RecordingRecord } from '@shared/types';
 import { api } from '../lib/api';
 import { formatTime } from '../lib/events';
 import { RecordingCard } from '../components/RecordingCard';
+import { IconRecord, IconStop, IconFilm } from '../components/Icons';
 
 export interface HomePageProps {
   status: LiveStatus | null;
@@ -11,6 +12,14 @@ export interface HomePageProps {
   onGoToLibrary: () => void;
 }
 
+/**
+ * Pantalla de inicio.
+ *
+ * Deliberadamente sin avisos. Al entrar no hay nada que leer ni que cerrar: el
+ * estado cabe en una linea, y el detalle vive en Ajustes -> Diagnostico para
+ * quien lo quiera. Solo se interrumpe al usuario cuando algo falla de verdad
+ * mientras usa la aplicacion, y entonces con un aviso puntual que se va solo.
+ */
 export function HomePage({
   status,
   recent,
@@ -23,62 +32,37 @@ export function HomePage({
 
   return (
     <div>
-      <h1 className="page-title">Inicio</h1>
-      <p className="page-subtitle">
-        Clipper vigila tus juegos y graba la partida completa con los eventos marcados.
-      </p>
+      <h1 className="page__title">Inicio</h1>
+      <p className="page__sub">Tus partidas, grabadas enteras y con lo importante marcado.</p>
 
-      <ProviderBanners status={status} onNotify={onNotify} />
-
-      <div className={`recorder-panel${recording ? ' recorder-panel--live' : ''}`}>
-        <div className="recorder-header">
+      <div className={`stage${recording ? ' stage--live' : ''}`}>
+        <div className="stage__head">
           <div>
-            <div className="status-line">
-              <span
-                className={`dot ${
-                  recording ? 'dot--live' : detected ? 'dot--ready' : ''
-                }`}
-              />
-              {recording
-                ? 'GRABANDO'
-                : detected
-                  ? `${status?.gameName} detectado`
-                  : 'No grabando'}
+            <div className="state">
+              <span className={`dot ${recording ? 'dot--live' : detected ? 'dot--ready' : ''}`} />
+              {recording ? 'Grabando' : detected ? 'Juego detectado' : 'En espera'}
             </div>
 
-            {recording && (
+            {recording ? (
               <>
                 <div className="timer">{formatTime(status?.elapsed ?? 0)}</div>
-                <div style={{ color: 'var(--text-1)', fontWeight: 600 }}>{status?.gameName}</div>
-                <div className="live-stats">
-                  <LiveStat label="Kills" value={status?.summary.kills ?? 0} color="var(--kill)" icon="⚔️" />
-                  <LiveStat label="Muertes" value={status?.summary.deaths ?? 0} color="var(--death)" icon="💀" />
-                  <LiveStat
-                    label="Headshots"
-                    value={status?.summary.headshots ?? 0}
-                    color="var(--headshot)"
-                    icon="🎯"
-                  />
-                  <LiveStat
-                    label="Asistencias"
-                    value={status?.summary.assists ?? 0}
-                    color="var(--assist)"
-                    icon="🤝"
-                  />
+                <div className="stage__game">{status?.gameName}</div>
+              </>
+            ) : (
+              <>
+                <div className="timer" style={{ color: 'var(--text-3)' }}>
+                  {detected ? status?.gameName : '00:00'}
+                </div>
+                <div className="stage__hint">
+                  {detected
+                    ? 'Listo para grabar esta partida.'
+                    : 'Abre VALORANT, Rainbow Six Siege o League of Legends y empezara sola.'}
                 </div>
               </>
             )}
-
-            {!recording && (
-              <div style={{ color: 'var(--text-2)', marginTop: 8, fontSize: 13 }}>
-                {detected
-                  ? 'Listo para grabar esta partida.'
-                  : 'Deteccion automatica activa. Abre VALORANT, Rainbow Six Siege o League of Legends.'}
-              </div>
-            )}
           </div>
 
-          <div style={{ display: 'flex', gap: 10 }}>
+          <div>
             {recording ? (
               <button
                 className="btn btn--danger"
@@ -88,7 +72,8 @@ export function HomePage({
                     .catch((err) => onNotify('No se ha podido detener', (err as Error).message))
                 }
               >
-                ■ Detener grabacion
+                <IconStop size={13} />
+                Detener
               </button>
             ) : (
               <button
@@ -99,51 +84,49 @@ export function HomePage({
                     .catch((err) => onNotify('No se ha podido iniciar', (err as Error).message))
                 }
               >
-                ● Grabar ahora
+                <IconRecord size={12} />
+                Grabar ahora
               </button>
             )}
           </div>
         </div>
 
-        <div
-          style={{
-            marginTop: 18,
-            paddingTop: 16,
-            borderTop: '1px solid var(--border)',
-            display: 'flex',
-            gap: 26,
-            flexWrap: 'wrap',
-            fontSize: 12,
-            color: 'var(--text-2)',
-          }}
-        >
+        {recording && (
+          <div className="stats">
+            <Stat label="Kills" value={status?.summary.kills ?? 0} color="var(--kill)" />
+            <Stat label="Muertes" value={status?.summary.deaths ?? 0} color="var(--death)" />
+            <Stat label="Headshots" value={status?.summary.headshots ?? 0} color="var(--headshot)" />
+            <Stat label="Asistencias" value={status?.summary.assists ?? 0} color="var(--assist)" />
+          </div>
+        )}
+
+        <div className="strip">
           <span>
-            Captura: <strong style={{ color: 'var(--text-1)' }}>{recorderLabel(status)}</strong>
+            Captura <b>{recorderLabel(status)}</b>
           </span>
           <span>
-            Eventos:{' '}
-            <strong style={{ color: 'var(--text-1)' }}>{providerLabel(status)}</strong>
+            Eventos <b>{providerLabel(status)}</b>
           </span>
-          {status?.diskFreeGb !== null && status?.diskFreeGb !== undefined && (
+          {typeof status?.diskFreeGb === 'number' && (
             <span>
-              Disco libre:{' '}
-              <strong style={{ color: 'var(--text-1)' }}>{status.diskFreeGb.toFixed(1)} GB</strong>
+              Disco <b className="num">{status.diskFreeGb.toFixed(0)} GB</b>
             </span>
           )}
-          <span>
-            Atajos: <span className="kbd">F8</span> clip · <span className="kbd">F9</span> marcador ·{' '}
+          <span style={{ marginLeft: 'auto' }}>
+            <span className="kbd">F8</span> clip <span className="kbd">F9</span> marcador{' '}
             <span className="kbd">F10</span> grabar
           </span>
         </div>
       </div>
 
-      <div className="section-title">Ultimas partidas</div>
+      <div className="section">Ultimas partidas</div>
+
       {recent.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state__icon">🎬</div>
-          <div>Todavia no hay grabaciones.</div>
-          <div style={{ fontSize: 12 }}>
-            Abre uno de los juegos soportados y Clipper empezara a grabar solo.
+        <div className="empty">
+          <IconFilm size={34} className="empty__mark" />
+          <div className="empty__title">Todavia no hay partidas</div>
+          <div className="empty__hint">
+            En cuanto abras uno de los juegos soportados, Clipper empezara a grabar por su cuenta.
           </div>
         </div>
       ) : (
@@ -154,8 +137,8 @@ export function HomePage({
             ))}
           </div>
           {recent.length > 4 && (
-            <button className="btn btn--ghost" style={{ marginTop: 14 }} onClick={onGoToLibrary}>
-              Ver todas las partidas →
+            <button className="btn btn--quiet" style={{ marginTop: 16 }} onClick={onGoToLibrary}>
+              Ver todas
             </button>
           )}
         </>
@@ -164,159 +147,47 @@ export function HomePage({
   );
 }
 
-function LiveStat({
-  label,
-  value,
-  color,
-  icon,
-}: {
-  label: string;
-  value: number;
-  color: string;
-  icon: string;
-}) {
+function Stat({ label, value, color }: { label: string; value: number; color: string }) {
   return (
-    <div className="live-stat">
-      <span>{icon}</span>
-      <span style={{ color }}>{value}</span>
-      <span className="live-stat__label">{label}</span>
+    <div>
+      <div className="stat__value" style={{ color }}>
+        {value}
+      </div>
+      <div className="stat__label">{label}</div>
     </div>
   );
 }
 
 function recorderLabel(status: LiveStatus | null): string {
-  if (!status || status.recorder.status === 'checking') return 'comprobando...';
+  if (!status || status.recorder.status === 'checking') return 'comprobando';
   if (status.recorder.status === 'unavailable') return 'no disponible';
-  return status.recorder.backend === 'overwolf'
-    ? 'Overwolf (OBS, hardware)'
-    : 'FFmpeg (pantalla, automatico)';
+  return status.recorder.backend === 'overwolf' ? 'Overwolf' : 'automatica';
 }
 
 function providerLabel(status: LiveStatus | null): string {
-  if (!status) return 'comprobando...';
+  if (!status) return 'comprobando';
   const name =
     status.provider.provider === 'riot-live-client'
       ? 'API de Riot'
       : status.provider.provider === 'r6-replay'
-        ? 'Repeticiones de R6'
+        ? 'repeticiones'
         : status.provider.provider === 'valorant-match-api'
-          ? 'Historial de VALORANT'
+          ? 'historial'
           : 'GEP';
+
   switch (status.provider.status) {
     case 'connected':
-      return `${name} conectado`;
+      return name;
     case 'connecting':
-      return 'conectando...';
+      return 'conectando';
     case 'disconnected':
-      return `${name} listo, sin juego`;
+      return `${name}, sin juego`;
     case 'elevation-required':
       return 'requiere administrador';
     case 'error':
       return 'error';
     default:
-      // Que GEP no este no significa quedarse sin eventos: cada juego tiene su
-      // via nativa, que se activa al detectarlo. Decir "no disponible" aqui
-      // asustaba sin motivo.
-      return 'vias nativas, por juego';
+      // Sin GEP cada juego usa su propia fuente, que se activa al detectarlo.
+      return 'por juego';
   }
-}
-
-/**
- * Avisos de estado.
- *
- * Es la parte que evita el "fallo silencioso" del que hablabas: si GEP no esta
- * disponible o el juego corre elevado, se dice claramente y se explica que
- * hacer, en lugar de grabar partidas sin marcadores sin que el usuario sepa
- * por que.
- */
-function ProviderBanners({
-  status,
-  onNotify,
-}: {
-  status: LiveStatus | null;
-  onNotify: (title: string, message: string) => void;
-}) {
-  if (!status) return null;
-  const banners = [];
-
-  if (status.provider.status === 'elevation-required') {
-    banners.push(
-      <div className="banner banner--error" key="elevation">
-        <span style={{ fontSize: 17 }}>🛡</span>
-        <div>
-          <div className="banner__title">El juego se ejecuta como administrador</div>
-          <div className="banner__body">
-            {status.provider.message ??
-              'Reinicia Clipper como administrador para poder recibir los eventos del juego.'}{' '}
-            Mientras tanto la partida se grabara, pero sin marcadores de kills ni muertes.
-            Los atajos globales tampoco funcionaran con el juego en primer plano.
-          </div>
-          <div className="banner__actions">
-            <button
-              className="btn btn--sm"
-              onClick={() =>
-                void api.restartAsAdmin().then((r) =>
-                  onNotify('Reiniciar como administrador', r.instructions),
-                )
-              }
-            >
-              Como hacerlo
-            </button>
-          </div>
-        </div>
-      </div>,
-    );
-  } else if (status.provider.status === 'unavailable') {
-    banners.push(
-      <div className="banner banner--info" key="gep">
-        <span style={{ fontSize: 17 }}>ℹ</span>
-        <div>
-          <div className="banner__title">Funcionando sin Overwolf</div>
-          <div className="banner__body">
-            Los tres juegos tienen marcadores igualmente, usando las fuentes que ellos mismos
-            exponen: la API local de Riot en League of Legends, las repeticiones del juego en
-            Rainbow Six (requiere tener activado Match Replay) y el historial de partidas en
-            VALORANT. Frente a Overwolf solo se pierden dos cosas: los marcadores de Rainbow Six
-            y VALORANT aparecen al terminar la partida en vez de en directo, y VALORANT no
-            distingue headshots. No hay nada que configurar.
-          </div>
-        </div>
-      </div>,
-    );
-  }
-
-  if (status.recorder.status === 'ready' && status.recorder.backend === 'ffmpeg') {
-    banners.push(
-      <div className="banner banner--info" key="ffmpeg">
-        <span style={{ fontSize: 17 }}>ℹ</span>
-        <div>
-          <div className="banner__title">Grabando con FFmpeg</div>
-          <div className="banner__body">
-            Se captura la pantalla en lugar del proceso del juego. Clipper elige solo el monitor
-            y el metodo, comprobando que se vea imagen de verdad, asi que no tienes que
-            configurar nada.
-          </div>
-        </div>
-      </div>,
-    );
-  }
-
-  // Solo se avisa cuando la comprobacion ha TERMINADO sin encontrar nada.
-  // Mientras esta en curso no se puede afirmar que no haya sistema de captura.
-  if (status.recorder.status === 'unavailable') {
-    banners.push(
-      <div className="banner banner--error" key="norecorder">
-        <span style={{ fontSize: 17 }}>⛔</span>
-        <div>
-          <div className="banner__title">No hay ningun sistema de captura disponible</div>
-          <div className="banner__body">
-            {status.recorder.message ??
-              'No se ha encontrado ningun codificador de video utilizable.'}
-          </div>
-        </div>
-      </div>,
-    );
-  }
-
-  return <>{banners}</>;
 }

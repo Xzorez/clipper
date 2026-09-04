@@ -1,6 +1,7 @@
 import { GAME_DISPLAY_NAMES, RecordingRecord } from '@shared/types';
 import { api } from '../lib/api';
 import { formatDateShort, formatTime } from '../lib/events';
+import { IconFilm } from './Icons';
 
 export function RecordingCard({
   recording,
@@ -13,8 +14,8 @@ export function RecordingCard({
   const isLol = recording.game === 'lol';
 
   return (
-    <button className="rec-card" onClick={() => onOpen(recording.id)}>
-      <div className="rec-card__thumb">
+    <button className="rec" onClick={() => onOpen(recording.id)}>
+      <div className="rec__thumb">
         {recording.thumbnailPath ? (
           <img
             src={api.mediaUrl(recording.thumbnailPath)}
@@ -26,36 +27,40 @@ export function RecordingCard({
             }}
           />
         ) : (
-          <span className="rec-card__placeholder">🎬</span>
+          <IconFilm size={26} className="rec__ph" />
         )}
 
-        {recording.missingFile && <span className="rec-card__badge">sin video</span>}
+        {recording.missingFile && <span className="rec__tag">sin video</span>}
         {!recording.missingFile && recording.status === 'recovered' && (
-          <span className="rec-card__badge">recuperada</span>
+          <span className="rec__tag">recuperada</span>
         )}
 
-        <span className="rec-card__duration">{formatTime(recording.duration ?? 0)}</span>
+        <span className="rec__time">{formatTime(recording.duration ?? 0)}</span>
       </div>
 
-      <div className="rec-card__body">
-        <div className="rec-card__game">{GAME_DISPLAY_NAMES[recording.game]}</div>
-        <div className="rec-card__date">{formatDateShort(recording.startedAt)}</div>
+      <div className="rec__body">
+        <div className="rec__game">{GAME_DISPLAY_NAMES[recording.game]}</div>
+        <div className="rec__date">{formatDateShort(recording.startedAt)}</div>
 
         {summary && (
-          <div className="stat-row">
-            <span className="stat" style={{ color: 'var(--kill)' }}>
-              ⚔️ {summary.kills}
+          <div className="rec__stats">
+            <span className="rec__stat">
+              <i style={{ background: 'var(--kill)' }} />
+              {summary.kills}
             </span>
-            <span className="stat" style={{ color: 'var(--death)' }}>
-              💀 {summary.deaths}
+            <span className="rec__stat">
+              <i style={{ background: 'var(--death)' }} />
+              {summary.deaths}
             </span>
             {isLol ? (
-              <span className="stat" style={{ color: 'var(--assist)' }}>
-                🤝 {summary.assists}
+              <span className="rec__stat">
+                <i style={{ background: 'var(--assist)' }} />
+                {summary.assists}
               </span>
             ) : (
-              <span className="stat" style={{ color: 'var(--headshot)' }}>
-                🎯 {summary.headshots}
+              <span className="rec__stat">
+                <i style={{ background: 'var(--headshot)' }} />
+                {summary.headshots}
               </span>
             )}
           </div>

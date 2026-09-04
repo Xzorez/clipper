@@ -17,6 +17,7 @@ import { ThumbnailService } from '../core/services/ThumbnailService';
 import { ClipService } from '../core/services/ClipService';
 import { HotkeyService, HotkeyAction } from '../core/services/HotkeyService';
 import { RecoveryService } from '../core/services/RecoveryService';
+import { UpdateService } from '../core/services/UpdateService';
 import { AdapterRegistry } from '../core/games/registry';
 import { GepProvider } from '../core/gep/GepProvider';
 import { RiotLiveClientProvider } from '../core/providers/RiotLiveClientProvider';
@@ -48,6 +49,7 @@ export class AppContext {
   clips!: ClipService;
   hotkeys!: HotkeyService;
   recovery!: RecoveryService;
+  updates!: UpdateService;
   registry!: AdapterRegistry;
   gep!: GepProvider;
   riot!: RiotLiveClientProvider;
@@ -125,6 +127,7 @@ export class AppContext {
 
     this.hotkeys = new HotkeyService();
     this.recovery = new RecoveryService(this.db, this.thumbnails);
+    this.updates = new UpdateService();
 
     this.wireEvents();
 
@@ -140,6 +143,8 @@ export class AppContext {
 
     this.registerHotkeys(settings);
     this.detection.start();
+    // Silenciosa por diseno: descarga sola y se aplica al cerrar.
+    this.updates.start();
 
     // Sondeo de capacidades en segundo plano: no bloquea el arranque.
     void this.refreshRecorderCapabilities();
@@ -390,6 +395,7 @@ export class AppContext {
   async dispose(): Promise<void> {
     if (this.statusTimer) clearInterval(this.statusTimer);
     this.hotkeys?.dispose();
+    this.updates?.dispose();
     await this.detection?.dispose();
     await this.recordingManager?.dispose();
     this.recorder?.dispose();

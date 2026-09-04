@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { GAME_DISPLAY_NAMES, GameKey, RecordingRecord } from '@shared/types';
 import { api } from '../lib/api';
 import { RecordingCard } from '../components/RecordingCard';
+import { IconFilm, IconMore } from '../components/Icons';
 
 export interface LibraryPageProps {
   recordings: RecordingRecord[];
@@ -57,8 +58,8 @@ export function LibraryPage({
 
   return (
     <div>
-      <h1 className="page-title">Mis partidas</h1>
-      <p className="page-subtitle">
+      <h1 className="page__title">Mis partidas</h1>
+      <p className="page__sub">
         {filtered.length} grabacion{filtered.length === 1 ? '' : 'es'}
         {totals.seconds > 0 && ` · ${Math.round(totals.seconds / 60)} minutos`}
         {totals.kills > 0 && ` · ${totals.kills} kills en total`}
@@ -68,11 +69,11 @@ export function LibraryPage({
         {GAME_FILTERS.map((item) => (
           <button
             key={item.key}
-            className={`tab${filter === item.key ? ' tab--active' : ''}`}
+            className={`tab${filter === item.key ? ' tab--on' : ''}`}
             onClick={() => setFilter(item.key)}
           >
             {item.label}
-            <span style={{ marginLeft: 7, opacity: 0.6, fontSize: 11 }}>
+            <span className="tab__n">
               {item.key === 'all'
                 ? recordings.length
                 : recordings.filter((r) => r.game === item.key).length}
@@ -82,12 +83,12 @@ export function LibraryPage({
       </div>
 
       {filtered.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state__icon">📼</div>
-          <div>
+        <div className="empty">
+          <IconFilm size={32} className="empty__mark" />
+          <div className="empty__title">
             {filter === 'all'
-              ? 'Todavia no hay ninguna partida grabada.'
-              : `No hay partidas de ${GAME_DISPLAY_NAMES[filter as GameKey]}.`}
+              ? 'Todavia no hay partidas'
+              : `Sin partidas de ${GAME_DISPLAY_NAMES[filter as GameKey]}`}
           </div>
         </div>
       ) : (
@@ -96,7 +97,7 @@ export function LibraryPage({
             <div key={item.id} style={{ position: 'relative' }}>
               <RecordingCard recording={item} onOpen={onOpenRecording} />
               <button
-                className="btn btn--sm btn--ghost"
+                className="btn btn--sm btn--quiet"
                 style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.6)' }}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -104,7 +105,7 @@ export function LibraryPage({
                 }}
                 title="Opciones"
               >
-                ⋯
+                <IconMore size={14} />
               </button>
 
               {selected === item.id && (
@@ -117,18 +118,18 @@ export function LibraryPage({
                     zIndex: 20,
                     padding: 8,
                     minWidth: 210,
-                    boxShadow: 'var(--shadow)',
+                    boxShadow: '0 16px 40px rgba(0,0,0,0.6)',
                   }}
                 >
                   <button
-                    className="btn btn--sm btn--ghost"
+                    className="btn btn--sm btn--quiet"
                     style={{ width: '100%', justifyContent: 'flex-start' }}
                     onClick={() => void api.revealPath(item.filePath).catch(() => undefined)}
                   >
                     Ver en la carpeta
                   </button>
                   <button
-                    className="btn btn--sm btn--ghost"
+                    className="btn btn--sm btn--quiet"
                     style={{ width: '100%', justifyContent: 'flex-start' }}
                     onClick={() => void remove(item.id, false)}
                   >

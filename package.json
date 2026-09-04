@@ -1,41 +1,41 @@
 {
   "name": "clipper",
   "version": "0.1.0",
-  "description": "Grabador automatico de partidas con eventos de juego en la linea temporal (VALORANT, Rainbow Six Siege, League of Legends)",
+  "description": "Grabador automatico de partidas con eventos sobre la linea temporal (VALORANT, Rainbow Six Siege, League of Legends)",
   "main": "dist/main/main/index.js",
-  "author": "Clipper",
+  "author": "xzore",
   "license": "MIT",
   "private": true,
   "overwolf": {
-    "packages": [
-      "gep",
-      "recorder",
-      "utility"
-    ]
+    "packages": ["gep", "recorder", "utility"]
   },
   "scripts": {
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:renderer",
     "dev:renderer": "vite",
-    "start": "npm run build && ow-electron .",
-    "start:vanilla": "npm run build && electron .",
+    "start": "npm run build && electron .",
+    "start:overwolf": "npm run build && ow-electron .",
+    "icon": "electron scripts/make-icon.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
-    "dist": "npm run build && ow-electron-builder --publish=never"
+    "dist": "npm run build && electron-builder --win --publish never",
+    "release": "npm run build && electron-builder --win --publish always"
   },
   "dependencies": {
+    "electron-updater": "^6.6.2",
     "ffmpeg-static": "^5.2.0"
   },
   "devDependencies": {
     "@overwolf/ow-electron": "42.7.1",
-    "@overwolf/ow-electron-builder": "^26.9.2",
     "@overwolf/ow-electron-packages-types": "^1.1.10",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.17",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
+    "electron": "44.1.1",
+    "electron-builder": "^26.0.12",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "^5.7.2",
@@ -45,14 +45,48 @@
   "build": {
     "appId": "com.clipper.app",
     "productName": "Clipper",
+    "copyright": "Copyright 2026 xzore",
     "asar": true,
-    "nodeGypRebuild": false,
-    "directories": { "output": "release" },
-    "files": ["dist/**/*", "resources/**/*", "node_modules/**/*", "package.json"],
-    "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
-      "artifactName": "${productName}-Setup-${version}.${ext}"
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
     },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+    "files": [
+      "dist/**/*",
+      "resources/icon.ico",
+      "resources/icon.png",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
+    ],
+    "win": {
+      "icon": "resources/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "Clipper-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Clipper"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "CAMBIA-ESTO-POR-TU-USUARIO",
+        "repo": "clipper",
+        "private": true,
+        "releaseType": "release"
+      }
+    ]
   }
 }

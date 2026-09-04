@@ -1,0 +1,31 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Clipper">
+  <!--
+    La marca: un anillo con un tramo destacado.
+
+    El anillo es la grabacion, continua y completa. El tramo en color es el
+    momento marcado dentro de ella, que es exactamente lo que hace la
+    aplicacion: no recorta la partida, la conserva entera y senala lo que
+    importa. El punto cierra el tramo como cabezal de reproduccion.
+
+    Se dibuja con trazos redondeados y un solo acento para que aguante bien a
+    16 px, que es donde acaban muriendo la mayoria de los logos.
+  -->
+  <g fill="none" stroke-linecap="round">
+    <!-- Anillo base: la grabacion completa. -->
+    <circle cx="32" cy="32" r="21" stroke="currentColor" stroke-width="5" opacity="0.28" />
+
+    <!-- Tramo marcado. El dasharray recorta poco mas de un cuarto de vuelta. -->
+    <circle
+      cx="32"
+      cy="32"
+      r="21"
+      stroke="var(--logo-accent, #7A6FF0)"
+      stroke-width="5"
+      stroke-dasharray="38 194"
+      transform="rotate(-72 32 32)"
+    />
+  </g>
+
+  <!-- Cabezal: cierra el tramo marcado. -->
+  <circle cx="32" cy="11" r="4.5" fill="var(--logo-accent, #7A6FF0)" />
+</svg>

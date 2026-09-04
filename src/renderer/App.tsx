@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AppSettings, DetectionState, LiveStatus, RecordingRecord } from '@shared/types';
 import { api } from './lib/api';
+import { Logo } from './components/Logo';
+import { IconHome, IconLibrary, IconClips, IconSettings } from './components/Icons';
 import { HomePage } from './pages/HomePage';
 import { LibraryPage } from './pages/LibraryPage';
 import { PlayerPage } from './pages/PlayerPage';
@@ -21,10 +23,10 @@ interface Toast {
 }
 
 const NAV = [
-  { name: 'home', icon: '⌂', label: 'Inicio' },
-  { name: 'library', icon: '▤', label: 'Mis partidas' },
-  { name: 'clips', icon: '✂', label: 'Clips' },
-  { name: 'settings', icon: '⚙', label: 'Configuracion' },
+  { name: 'home', label: 'Inicio', Icon: IconHome },
+  { name: 'library', label: 'Mis partidas', Icon: IconLibrary },
+  { name: 'clips', label: 'Clips', Icon: IconClips },
+  { name: 'settings', label: 'Ajustes', Icon: IconSettings },
 ] as const;
 
 export function App() {
@@ -35,6 +37,12 @@ export function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [clipsToken, setClipsToken] = useState(0);
 
+  /**
+   * Los avisos son puntuales y se van solos.
+   *
+   * La aplicacion no muestra nada al entrar: solo aparece algo cuando ocurre
+   * de verdad, y desaparece sin que haya que cerrarlo.
+   */
   const notify = useCallback((title: string, message: string) => {
     const id = Date.now() + Math.random();
     setToasts((previous) => [...previous, { id, title, message }]);
@@ -50,7 +58,6 @@ export function App() {
       .catch((err) => notify('No se ha podido cargar la biblioteca', (err as Error).message));
   }, [notify]);
 
-  // Carga inicial y suscripciones al proceso principal.
   useEffect(() => {
     void api.getStatus().then(setStatus).catch(() => undefined);
     void api.getSettings().then(setSettings).catch(() => undefined);
@@ -86,85 +93,77 @@ export function App() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <div className="sidebar__brand">
-          <span className="sidebar__logo">◉</span>
-          Clipper
+        <div className="brand">
+          <Logo size={26} className="brand__mark" />
+          <span className="brand__name">Clipper</span>
         </div>
 
-        {NAV.map((item) => (
-          <button
-            key={item.name}
-            className={`nav-item${route.name === item.name ? ' nav-item--active' : ''}`}
-            onClick={() => setRoute({ name: item.name } as Route)}
-          >
-            <span className="nav-item__icon">{item.icon}</span>
-            {item.label}
-          </button>
-        ))}
+        <nav className="nav">
+          {NAV.map(({ name, label, Icon }) => (
+            <button
+              key={name}
+              className={`nav__item${route.name === name ? ' nav__item--on' : ''}`}
+              onClick={() => setRoute({ name } as Route)}
+            >
+              <Icon size={16} className="nav__icon" />
+              {label}
+            </button>
+          ))}
+        </nav>
 
-        <div className="sidebar__spacer" />
+        <div className="sidebar__gap" />
 
-        <div className="sidebar__status">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
-            <span className={`dot ${recording ? 'dot--live' : status ? 'dot--ready' : 'dot--warn'}`} />
-            <strong style={{ color: 'var(--text-0)', fontSize: 12.5 }}>
-              {recording ? 'Grabando' : 'En espera'}
-            </strong>
-          </div>
-          {recording && status?.gameName && (
-            <div style={{ fontSize: 11.5 }}>{status.gameName}</div>
-          )}
-          {!recording && (
-            <div style={{ fontSize: 11.5, lineHeight: 1.4 }}>
-              Deteccion automatica activa
-            </div>
-          )}
+        <div className={`pill${recording ? ' pill--live' : ''}`}>
+          <span className={`dot ${recording ? 'dot--live' : 'dot--ready'}`} />
+          {recording ? status?.gameName ?? 'Grabando' : 'Listo'}
         </div>
       </aside>
 
       <main className="content">
-        {route.name === 'home' && (
-          <HomePage
-            status={status}
-            recent={recordings}
-            onOpenRecording={openRecording}
-            onNotify={notify}
-            onGoToLibrary={() => setRoute({ name: 'library' })}
-          />
-        )}
+        <div className="page rise" key={route.name}>
+          {route.name === 'home' && (
+            <HomePage
+              status={status}
+              recent={recordings}
+              onOpenRecording={openRecording}
+              onNotify={notify}
+              onGoToLibrary={() => setRoute({ name: 'library' })}
+            />
+          )}
 
-        {route.name === 'library' && (
-          <LibraryPage
-            recordings={recordings}
-            onOpenRecording={openRecording}
-            onRefresh={loadRecordings}
-            onNotify={notify}
-          />
-        )}
+          {route.name === 'library' && (
+            <LibraryPage
+              recordings={recordings}
+              onOpenRecording={openRecording}
+              onRefresh={loadRecordings}
+              onNotify={notify}
+            />
+          )}
 
-        {route.name === 'player' && (
-          <PlayerPage
-            recordingId={route.recordingId}
-            settings={settings}
-            onBack={() => setRoute({ name: 'library' })}
-            onNotify={notify}
-            onClipCreated={() => setClipsToken((t) => t + 1)}
-          />
-        )}
+          {route.name === 'player' && (
+            <PlayerPage
+              recordingId={route.recordingId}
+              settings={settings}
+              onBack={() => setRoute({ name: 'library' })}
+              onNotify={notify}
+              onClipCreated={() => setClipsToken((t) => t + 1)}
+            />
+          )}
 
-        {route.name === 'clips' && <ClipsPage refreshToken={clipsToken} onNotify={notify} />}
+          {route.name === 'clips' && <ClipsPage refreshToken={clipsToken} onNotify={notify} />}
 
-        {route.name === 'settings' && (
-          <SettingsPage
-            settings={settings}
-            status={status}
-            onChange={updateSettings}
-            onNotify={notify}
-          />
-        )}
+          {route.name === 'settings' && (
+            <SettingsPage
+              settings={settings}
+              status={status}
+              onChange={updateSettings}
+              onNotify={notify}
+            />
+          )}
+        </div>
       </main>
 
-      <div className="toast-stack">
+      <div className="toasts">
         {toasts.map((toast) => (
           <div className="toast" key={toast.id}>
             <div className="toast__title">{toast.title}</div>

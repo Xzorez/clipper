@@ -15,6 +15,7 @@ import {
   formatTime,
 } from '../lib/events';
 import { VideoPlayer, VideoPlayerHandle } from '../components/VideoPlayer';
+import { IconBack, IconScissors } from '../components/Icons';
 import { Timeline } from '../components/Timeline';
 
 export interface PlayerPageProps {
@@ -140,14 +141,13 @@ export function PlayerPage({
   );
 
   if (loading) {
-    return <div className="empty-state">Cargando grabacion...</div>;
+    return <div className="empty">Cargando grabacion...</div>;
   }
 
   if (!recording) {
     return (
-      <div className="empty-state">
-        <div className="empty-state__icon">⚠</div>
-        <div>{error ?? 'No se ha encontrado la grabacion.'}</div>
+      <div className="empty">
+        <div className="empty__title">{error ?? 'No se ha encontrado la grabacion.'}</div>
         <button className="btn" onClick={onBack}>
           Volver
         </button>
@@ -159,10 +159,11 @@ export function PlayerPage({
   const effectiveDuration = duration || recording.duration || 0;
 
   return (
-    <div className="player-page">
-      <div className="toolbar">
-        <button className="btn btn--ghost btn--sm" onClick={onBack}>
-          ← Volver
+    <div className="player">
+      <div className="bar">
+        <button className="btn btn--quiet btn--sm" onClick={onBack}>
+          <IconBack size={14} />
+          Volver
         </button>
         <div style={{ flex: 1 }} />
         <button
@@ -183,22 +184,20 @@ export function PlayerPage({
       </div>
 
       {error && (
-        <div className="banner banner--error">
+        <div className="note note--danger">
           <div>
-            <div className="banner__title">Problema con el video</div>
-            <div className="banner__body">{error}</div>
+            <b>Problema con el video</b>
+            {error}
           </div>
         </div>
       )}
 
       {recording.status === 'recovered' && (
-        <div className="banner banner--warning">
+        <div className="note note--warn">
           <div>
-            <div className="banner__title">Grabacion recuperada</div>
-            <div className="banner__body">
-              Esta partida se recupero tras un cierre inesperado. La duracion es aproximada y
-              los ultimos segundos pueden faltar, pero los eventos detectados se conservaron.
-            </div>
+            <b>Grabacion recuperada</b>
+            Se recupero tras un cierre inesperado. La duracion es aproximada y pueden faltar los
+            ultimos segundos, pero los eventos se conservaron.
           </div>
         </div>
       )}
@@ -215,9 +214,9 @@ export function PlayerPage({
         />
       )}
 
-      <div className="timeline-panel">
-        <div className="timeline-header">
-          <div className="filters">
+      <div className="tl">
+        <div className="tl__head">
+          <div className="chips">
             {DEFAULT_VISIBLE_TYPES.map((type) => {
               const visual = EVENT_VISUALS[type];
               const active = visibleTypes.has(type);
@@ -225,23 +224,25 @@ export function PlayerPage({
               return (
                 <button
                   key={type}
-                  className={`filter-chip${active ? ' filter-chip--on' : ''}`}
-                  style={active ? { borderColor: visual.color, color: visual.color } : undefined}
+                  className={`chip${active ? ' chip--on' : ''}`}
+                  style={active ? { color: visual.color } : undefined}
                   onClick={() => toggleType([type])}
                 >
-                  {visual.icon} {visual.label}
-                  <span className="filter-chip__count">{count}</span>
+                  <i style={{ background: visual.color }} />
+                  {visual.label}
+                  <span className="chip__n">{count}</span>
                 </button>
               );
             })}
             <button
-              className={`filter-chip${
-                OTHER_TYPES.every((t) => visibleTypes.has(t)) ? ' filter-chip--on' : ''
+              className={`chip${
+                OTHER_TYPES.every((t) => visibleTypes.has(t)) ? ' chip--on' : ''
               }`}
               onClick={() => toggleType(OTHER_TYPES)}
             >
-              ⋯ Otros
-              <span className="filter-chip__count">
+              <i style={{ background: 'var(--round)' }} />
+              Otros
+              <span className="chip__n">
                 {OTHER_TYPES.reduce((sum, t) => sum + (counts.get(t) ?? 0), 0)}
               </span>
             </button>
@@ -260,7 +261,7 @@ export function PlayerPage({
       </div>
 
       <div className="card">
-        <div className="section-title" style={{ marginTop: 0 }}>
+        <div className="section" style={{ marginTop: 0 }}>
           Eventos de la partida
         </div>
         <EventList
@@ -307,9 +308,9 @@ function SummaryBar({
   }
 
   return (
-    <div className="summary-bar">
+    <div className="summary">
       <div>
-        <div className="summary-bar__game">{GAME_DISPLAY_NAMES[recording.game]}</div>
+        <div className="summary__game">{GAME_DISPLAY_NAMES[recording.game]}</div>
         <div style={{ color: 'var(--text-2)', fontSize: 12 }}>
           {formatDate(recording.startedAt)} · {formatTime(recording.duration ?? 0)}
           {recording.resolution && ` · ${recording.resolution}`}
@@ -318,11 +319,11 @@ function SummaryBar({
       </div>
       <div style={{ flex: 1 }} />
       {stats.map((stat) => (
-        <div className="summary-stat" key={stat.label}>
-          <span className="summary-stat__value" style={{ color: stat.color }}>
+        <div className="stat" key={stat.label}>
+          <span className="stat__value" style={{ color: stat.color }}>
             {stat.value}
           </span>
-          <span className="summary-stat__label">{stat.label}</span>
+          <span className="stat__label">{stat.label}</span>
         </div>
       ))}
     </div>
@@ -348,7 +349,7 @@ function EventList({
 
   if (filtered.length === 0) {
     return (
-      <div className="empty-state" style={{ padding: '32px 16px' }}>
+      <div className="empty" style={{ padding: '32px 16px' }}>
         <div>
           {events.length === 0
             ? 'Esta grabacion no tiene eventos. Puede que el proveedor de eventos no estuviera activo durante la partida.'
@@ -359,32 +360,30 @@ function EventList({
   }
 
   return (
-    <div className="event-list">
+    <div className="events">
       {filtered.map((event) => {
         const visual = EVENT_VISUALS[event.type];
         return (
           <div
             key={event.id}
-            className={`event-row${event.id === activeEventId ? ' event-row--active' : ''}`}
+            className={`ev${event.id === activeEventId ? ' ev--on' : ''}`}
           >
-            <span className="event-row__icon" style={{ background: visual.color, color: '#0a0c11' }}>
-              {visual.icon}
-            </span>
+            <span className="ev__dot" style={{ background: visual.color }} />
             <button
-              className="event-row__label"
+              className="ev__name"
               style={{ background: 'none', textAlign: 'left' }}
               onClick={() => onSelect(event)}
             >
               {visual.label}
             </button>
-            <span className="event-row__time">{formatTime(event.videoTime)}</span>
+            <span className="ev__t">{formatTime(event.videoTime)}</span>
             <button
-              className="btn btn--sm btn--ghost"
+              className="btn btn--sm btn--quiet"
               disabled={creatingClip}
               onClick={() => onCreateClip(event)}
               title="Crear un clip alrededor de este evento"
             >
-              ✂
+              <IconScissors size={14} />
             </button>
           </div>
         );

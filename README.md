@@ -8,6 +8,20 @@ muestra kills, muertes, headshots y asistencias, y un clic en cualquier marcador
 
 ---
 
+## 0. Instalación
+
+Descarga `Clipper-Setup-x.y.z.exe` de la última release y ábrelo. Se instala en un clic y crea el
+acceso directo. **No hay nada que configurar**: al abrirla ya está vigilando los juegos.
+
+Windows mostrará un aviso de SmartScreen la primera vez, porque el instalador no está firmado con
+un certificado de empresa (cuestan varios cientos de euros al año). Se salta con
+*Más información → Ejecutar de todas formas*.
+
+Las actualizaciones son automáticas y silenciosas: se descargan de fondo y se aplican al cerrar la
+aplicación. No preguntan ni interrumpen.
+
+---
+
 ## 1. Investigación previa: qué es real y qué no
 
 Antes de escribir código verifiqué la documentación y el **código fuente oficial** de Overwolf
@@ -220,7 +234,7 @@ que los toca está en `ValorantLocalAuth` y `ValorantMatchApi`.
 
 | Capa | Elección | Motivo |
 |---|---|---|
-| Runtime | **ow-electron 42.7.1** (Electron 42 / Node 24.18 / Chromium 148) | Única vía para GEP. Fork de Electron, no una plataforma distinta. |
+| Runtime | **Electron 44.1.1** (Node 24.19 / Chromium 142) | Estándar. Ya no hace falta el fork de Overwolf: los tres juegos tienen vía nativa, y esto elimina el requisito de firma para distribuir. `ow-electron` sigue disponible con `npm run start:overwolf` para quien tenga credenciales. |
 | Lenguaje | **TypeScript** estricto | Modelo de eventos compartido y verificado entre procesos. |
 | Interfaz | **React 18 + Vite** | Reproductor `<video>` nativo con aceleración por hardware. |
 | Captura | **Paquete `recorder` de ow-electron** (OBS por debajo) | NVENC / AMF / Quick Sync y captura del *proceso* del juego. |
@@ -424,17 +438,33 @@ anti-cheat lo miran con lupa. `RegisterHotKey` consigue lo mismo sin ese riesgo.
 npm install
 ```
 
-### Ejecución completa (con eventos de juego)
+### Generar el instalador
 
-Para que GEP y el grabador de Overwolf funcionen hacen falta credenciales gratuitas de
-desarrollador de Overwolf. Se obtienen en <https://console.overwolf.com>.
+```bash
+npm install
+npm run dist
+```
+
+Deja `release/Clipper-Setup-x.y.z.exe` listo. No hace falta ninguna firma ni credencial.
+
+### Ejecución en desarrollo
+
+```bash
+npm start
+```
+
+### Ejecución con Overwolf (opcional)
+
+Overwolf ya no es necesario, pero sigue aportando dos cosas: eventos en tiempo real para Rainbow
+Six y VALORANT, y headshots en VALORANT. Si quieres eso, hacen falta credenciales de desarrollador
+de Overwolf, que exigen enviar y aprobar una idea de app en <https://console.overwolf.com>.
 
 En PowerShell:
 
 ```powershell
 $env:OW_CLI_EMAIL = "tu-email@ejemplo.com"
 $env:OW_CLI_API_KEY = "tu-api-key-de-la-consola"
-npm start
+npm run start:overwolf
 ```
 
 O con token de desarrollo:
@@ -683,6 +713,35 @@ verifica que el fichero resultante existe y es válido.
 
 ---
 
+## 9 bis. Actualizaciones automáticas
+
+`UpdateService` usa `electron-updater` contra los releases de GitHub. El comportamiento es
+deliberadamente invisible: comprueba a los 20 segundos del arranque y cada 4 horas, descarga de
+fondo y aplica la versión nueva **al cerrar la aplicación**. No hay diálogos ni preguntas.
+
+No reinicia por su cuenta a propósito: interrumpir a alguien en mitad de una partida sería peor que
+esperar a que cierre. La única señal visible es una línea en Ajustes → Diagnóstico con la versión
+actual y, si hay una descargándose, su progreso.
+
+Se apaga sola cuando la aplicación no está empaquetada, y un fallo de red o una configuración
+incompleta solo dejan una línea en el registro, nunca un aviso al usuario.
+
+### Configurar el repositorio
+
+En `package.json`, dentro de `build.publish`, cambia `owner` por tu usuario de GitHub. Como el
+repositorio es privado, publicar y actualizar necesitan un token personal de GitHub con permiso
+`repo`:
+
+```bash
+setx GH_TOKEN "tu-token"
+npm run release
+```
+
+Eso sube el instalador y el `latest.yml` a una release nueva, que es lo que las copias ya
+instaladas consultan para actualizarse.
+
+---
+
 ## 10. Estructura del proyecto
 
 ```
@@ -701,11 +760,13 @@ src/
                        FFmpegRecorder, RecorderProxy, CaptureProbe, captureArgs,
                        DiskSpaceGuard, SidecarStore
     database/          Database (node:sqlite)
-    services/          Settings, Thumbnail, Clip, Hotkey, Recovery
+    services/          Settings, Thumbnail, Clip, Hotkey, Recovery, Update
     logging/           Logger estructurado por subsistema
   main/                Entrada de Electron, AppContext (raíz de composición), IPC
   preload/             Puente con contextIsolation
-  renderer/            React: páginas, componentes (Timeline, VideoPlayer), estilos
+  renderer/            React: páginas, componentes (Timeline, VideoPlayer, Logo, Icons), estilos
+resources/             Logo e icono de la aplicación
+scripts/               Generación del icono de Windows desde el SVG
   shared/              Tipos, canales IPC, contrato de API, lógica de timeline
 tests/                 326 tests
   helpers/             Generador de repeticiones .rec sintéticas

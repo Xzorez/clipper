@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ClipRecord, GAME_DISPLAY_NAMES } from '@shared/types';
 import { api } from '../lib/api';
 import { formatDateShort, formatTime } from '../lib/events';
+import { IconClips } from '../components/Icons';
 
 export interface ClipsPageProps {
   refreshToken: number;
@@ -45,8 +46,8 @@ export function ClipsPage({ refreshToken, onNotify }: ClipsPageProps) {
 
   return (
     <div>
-      <h1 className="page-title">Clips</h1>
-      <p className="page-subtitle">
+      <h1 className="page__title">Clips</h1>
+      <p className="page__sub">
         Fragmentos recortados de tus grabaciones. Se generan sin recodificar, asi que
         conservan la calidad original.
       </p>
@@ -65,7 +66,7 @@ export function ClipsPage({ refreshToken, onNotify }: ClipsPageProps) {
               {formatTime(playing.endTime - playing.startTime)}
             </span>
             <div style={{ flex: 1 }} />
-            <button className="btn btn--sm btn--ghost" onClick={() => setPlaying(null)}>
+            <button className="btn btn--sm btn--quiet" onClick={() => setPlaying(null)}>
               Cerrar
             </button>
           </div>
@@ -73,42 +74,44 @@ export function ClipsPage({ refreshToken, onNotify }: ClipsPageProps) {
       )}
 
       {loading ? (
-        <div className="empty-state">Cargando clips...</div>
+        <div className="empty">
+          <div className="empty__title">Cargando clips</div>
+        </div>
       ) : clips.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state__icon">✂️</div>
-          <div>Todavia no has creado ningun clip.</div>
-          <div style={{ fontSize: 12 }}>
-            Abre una grabacion y pulsa el icono de tijera junto a cualquier evento.
+        <div className="empty">
+          <IconClips size={32} className="empty__mark" />
+          <div className="empty__title">Todavia no hay clips</div>
+          <div className="empty__hint">
+            Abre una grabacion y pulsa la tijera junto a cualquier evento.
           </div>
         </div>
       ) : (
         <div className="grid">
           {clips.map((clip) => (
-            <div className="rec-card" key={clip.id} style={{ cursor: 'default' }}>
+            <div className="rec" key={clip.id} style={{ cursor: 'default' }}>
               <button
-                className="rec-card__thumb"
+                className="rec__thumb"
                 style={{ width: '100%', border: 'none' }}
                 onClick={() => !clip.missingFile && setPlaying(clip)}
               >
                 {clip.thumbnailPath ? (
                   <img src={api.mediaUrl(clip.thumbnailPath)} alt="" loading="lazy" />
                 ) : (
-                  <span className="rec-card__placeholder">✂️</span>
+                  <IconClips size={24} className="rec__ph" />
                 )}
-                {clip.missingFile && <span className="rec-card__badge">sin fichero</span>}
-                <span className="rec-card__duration">
+                {clip.missingFile && <span className="rec__tag">sin fichero</span>}
+                <span className="rec__time">
                   {formatTime(clip.endTime - clip.startTime)}
                 </span>
               </button>
-              <div className="rec-card__body">
-                <div className="rec-card__game">{clip.title}</div>
-                <div className="rec-card__date">
+              <div className="rec__body">
+                <div className="rec__game">{clip.title}</div>
+                <div className="rec__date">
                   {GAME_DISPLAY_NAMES[clip.game]} · {formatDateShort(clip.createdAt)}
                 </div>
                 <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                   <button
-                    className="btn btn--sm btn--ghost"
+                    className="btn btn--sm btn--quiet"
                     onClick={() => void api.revealPath(clip.filePath).catch(() => undefined)}
                   >
                     Carpeta

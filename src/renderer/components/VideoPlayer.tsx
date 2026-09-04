@@ -1,5 +1,14 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { formatTime } from '../lib/events';
+import {
+  IconPlay,
+  IconPause,
+  IconSkipBack,
+  IconSkipFwd,
+  IconVolume,
+  IconMute,
+  IconFullscreen,
+} from './Icons';
 
 const SPEEDS = [0.25, 0.5, 1, 1.5, 2, 4];
 
@@ -112,7 +121,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   }, [togglePlay, skip]);
 
   return (
-    <div className="player-shell">
+    <div className="video">
       <video
         ref={videoRef}
         src={src}
@@ -136,23 +145,23 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
         }}
       />
 
-      <div className="player-controls">
-        <button className="player-btn" onClick={togglePlay} title="Reproducir / Pausa (Espacio)">
-          {playing ? '❚❚' : '▶'}
+      <div className="controls">
+        <button className="ctl" onClick={togglePlay} title="Reproducir / Pausa (Espacio)">
+          {playing ? <IconPause size={15} /> : <IconPlay size={15} />}
         </button>
-        <button className="player-btn" onClick={() => skip(-5)} title="Atras 5s (←)">
-          ⏪
+        <button className="ctl" onClick={() => skip(-5)} title="Atras 5s (←)">
+          <IconSkipBack size={15} />
         </button>
-        <button className="player-btn" onClick={() => skip(5)} title="Adelante 5s (→)">
-          ⏩
+        <button className="ctl" onClick={() => skip(5)} title="Adelante 5s (→)">
+          <IconSkipFwd size={15} />
         </button>
 
-        <span className="time-display">
+        <span className="time">
           {formatTime(current)} / {formatTime(duration)}
         </span>
 
         <input
-          className="scrubber"
+          className="scrub"
           type="range"
           min={0}
           max={duration || 0}
@@ -169,14 +178,14 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
         />
 
         <button
-          className="player-btn"
+          className="ctl"
           onClick={() => setMuted((m) => !m)}
           title="Silenciar (M)"
         >
-          {muted || volume === 0 ? '🔇' : '🔊'}
+          {muted || volume === 0 ? <IconMute size={15} /> : <IconVolume size={15} />}
         </button>
         <input
-          className="volume"
+          className="vol"
           type="range"
           min={0}
           max={1}
@@ -208,11 +217,11 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
         </select>
 
         <button
-          className="player-btn"
+          className="ctl"
           onClick={() => void videoRef.current?.requestFullscreen().catch(() => undefined)}
           title="Pantalla completa (F)"
         >
-          ⛶
+          <IconFullscreen size={15} />
         </button>
       </div>
     </div>

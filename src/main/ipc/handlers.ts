@@ -47,6 +47,8 @@ export function registerIpcHandlers(context: AppContext, getWindow: WindowGetter
 
   handle(IPC.GET_DIAGNOSTICS, async () => ({
     valorant: await diagnoseValorant(),
+    version: context.updates.currentVersion,
+    updates: context.updates.getStatus(),
     electron: process.versions.electron,
     node: process.versions.node,
     chrome: process.versions.chrome,
