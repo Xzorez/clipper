@@ -1,13 +1,17 @@
 {
   "name": "clipper",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Grabador automatico de partidas con eventos sobre la linea temporal (VALORANT, Rainbow Six Siege, League of Legends)",
   "main": "dist/main/main/index.js",
   "author": "xzore",
   "license": "MIT",
   "private": true,
   "overwolf": {
-    "packages": ["gep", "recorder", "utility"]
+    "packages": [
+      "gep",
+      "recorder",
+      "utility"
+    ]
   },
   "scripts": {
     "build:main": "tsc -p tsconfig.main.json",
@@ -65,7 +69,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "artifactName": "Clipper-Setup-${version}.${ext}"
