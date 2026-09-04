@@ -1,6 +1,6 @@
 {
   "name": "clipper",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Grabador automatico de partidas con eventos sobre la linea temporal (VALORANT, Rainbow Six Siege, League of Legends)",
   "main": "dist/main/main/index.js",
   "author": "xzore",
