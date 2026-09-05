@@ -143,9 +143,25 @@ async function main() {
   step('Verificando lo que veran los demas (sin credenciales)');
   const base = 'https://github.com/' + repo + '/releases/latest/download/';
 
-  const index = await fetchAnonymous(base + 'latest.yml');
-  if (index.status !== 200) throw new Error('latest.yml devuelve HTTP ' + index.status);
-  const published = /version:\s*(\S+)/.exec(index.body);
+  // GitHub tarda unos segundos en mover el puntero de "latest" a la release
+  // recien creada. Se reintenta en lugar de dar por fallida una publicacion
+  // que en realidad esta bien: lo que no se hace nunca es aceptar una lectura
+  // que no cuadre, que es justo lo que dejaba pasar el publicador anterior.
+  let index = null;
+  let published = null;
+  for (let intento = 1; intento <= 6; intento++) {
+    index = await fetchAnonymous(base + 'latest.yml');
+    published = index.status === 200 ? /version:\s*(\S+)/.exec(index.body) : null;
+    if (published && published[1] === version) break;
+    if (intento < 6) {
+      console.log('  todavia no se ve la version ' + version + '; se reintenta (' + intento + '/5)');
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+
+  if (!index || index.status !== 200) {
+    throw new Error('latest.yml devuelve HTTP ' + (index ? index.status : '?'));
+  }
   if (!published || published[1] !== version) {
     throw new Error('latest.yml publica la version ' + (published ? published[1] : '?') + ' y no ' + version);
   }
