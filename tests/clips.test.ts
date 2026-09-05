@@ -6,7 +6,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Database } from '../src/core/database/Database';
-import { ClipService } from '../src/core/services/ClipService';
+import {
+  ClipService,
+  CreateClipRequest,
+  VERTICAL_FILTER,
+  resolveRange,
+} from '../src/core/services/ClipService';
 import { ThumbnailService } from '../src/core/services/ThumbnailService';
 import { resolveFfmpegPath } from '../src/core/recording/ffmpegPath';
 
@@ -180,5 +185,79 @@ describe('ClipService (integracion con FFmpeg)', () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toContain('ya no existe');
+  });
+});
+
+/** Peticion minima; cada prueba cambia solo lo que le interesa. */
+function peticion(extra: Partial<CreateClipRequest> = {}): CreateClipRequest {
+  return {
+    recordingId: 'r1',
+    centerSeconds: 60,
+    secondsBefore: 10,
+    secondsAfter: 5,
+    ...extra,
+  };
+}
+
+/**
+ * Recorte del clip.
+ *
+ * Antes un clip eran siempre diez segundos antes y cinco despues. Ahora se
+ * puede fijar el principio y el final a mano, y eso abre justo los casos que
+ * se rompen solos: puntas invertidas, fuera de la grabacion, o tan juntas que
+ * no queda video.
+ */
+describe('recorte del clip', () => {
+  it('usa centro y margenes cuando no se ha ajustado nada', () => {
+    expect(resolveRange(peticion(), 600)).toEqual({ start: 50, end: 65 });
+  });
+
+  it('el ajuste a mano manda sobre los margenes', () => {
+    // Si alguien movio las puntas, sabe mejor que nosotros donde empieza la
+    // jugada.
+    expect(resolveRange(peticion({ startSeconds: 100, endSeconds: 130 }), 600)).toEqual({
+      start: 100,
+      end: 130,
+    });
+  });
+
+  it('no se sale por el principio de la grabacion', () => {
+    expect(resolveRange(peticion({ centerSeconds: 3 }), 600)).toEqual({ start: 0, end: 8 });
+  });
+
+  it('no se sale por el final de la grabacion', () => {
+    const rango = resolveRange(peticion({ startSeconds: 590, endSeconds: 900 }), 600);
+    expect(rango).toEqual({ start: 590, end: 600 });
+  });
+
+  it('rechaza un intervalo sin video', () => {
+    expect(resolveRange(peticion({ startSeconds: 100, endSeconds: 100.2 }), 600)).toEqual({
+      error: expect.stringContaining('demasiado corto'),
+    });
+  });
+
+  it('rechaza las puntas invertidas', () => {
+    expect(resolveRange(peticion({ startSeconds: 200, endSeconds: 100 }), 600)).toHaveProperty(
+      'error',
+    );
+  });
+});
+
+describe('encuadre vertical', () => {
+  it('recorta por el centro en vez de encoger con bandas', () => {
+    // En un juego la accion esta en el medio; unas bandas negras dejarian la
+    // jugada del tamano de un sello en el movil.
+    expect(VERTICAL_FILTER).toContain('crop=ih*9/16:ih');
+    expect(VERTICAL_FILTER).not.toContain('pad=');
+  });
+
+  it('deja el pixel cuadrado', () => {
+    // El recorte deja una relacion de pixel de 1216:1215 por redondeo, y un
+    // reproductor que la respete mostraria el clip deformado.
+    expect(VERTICAL_FILTER).toContain('setsar=1');
+  });
+
+  it('sale en la resolucion que esperan los moviles', () => {
+    expect(VERTICAL_FILTER).toContain('scale=1080:1920');
   });
 });

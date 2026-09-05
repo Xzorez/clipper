@@ -20,6 +20,7 @@ import { HotkeyService, HotkeyAction } from '../core/services/HotkeyService';
 import { RecoveryService } from '../core/services/RecoveryService';
 import { UpdateService } from '../core/services/UpdateService';
 import { AudioBridge } from './AudioBridge';
+import { HighlightService } from '../core/services/HighlightService';
 import { AdapterRegistry } from '../core/games/registry';
 import { GepProvider } from '../core/gep/GepProvider';
 import { RiotLiveClientProvider } from '../core/providers/RiotLiveClientProvider';
@@ -110,6 +111,7 @@ export class AppContext {
       diskGuard,
       thumbnails: this.thumbnails,
       audio: new AudioBridge(() => this.getWindow()),
+      highlights: new HighlightService(),
     });
 
     this.gep = new GepProvider(this.registry);
@@ -204,6 +206,12 @@ export class AppContext {
     // preguntar: al entrar se ve si hay una descarga en curso.
     this.updates.on('status', (status: UpdateStatus) => {
       this.send(IPC.ON_UPDATE_STATUS, status);
+    });
+
+    // Los destacados llegan despues de que la partida se haya guardado; la
+    // biblioteca tiene que enterarse para dejar de mostrar cero eventos.
+    this.recordingManager.on('events-added', () => {
+      this.send(IPC.ON_LIBRARY_CHANGED, null);
     });
 
     this.recordingManager.on('stopped', () => {

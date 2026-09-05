@@ -37,6 +37,9 @@
   --assist: #4ec5f0;
   --knocked: #f08a4a;
   --bookmark: #b39cf5;
+  /* Los destacados son una conjetura, no un hecho: color propio y mas apagado
+     que el resto, para que no compitan con los eventos reales del juego. */
+  --highlight: #6fb3c9;
   --round: #55555f;
 
   --danger: #f4566d;
@@ -1328,4 +1331,117 @@ select {
 
 .upd__btn:hover {
   filter: brightness(1.12);
+}
+
+/* --- Editor de recorte de clips -----------------------------------------
+   Aparece bajo el reproductor solo mientras se ajusta un clip. Ocupa sitio a
+   proposito: mientras esta abierto, es lo que se esta haciendo.
+------------------------------------------------------------------------ */
+
+.cliped {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  animation: upd-in 0.25s var(--ease) both;
+}
+
+.cliped__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cliped__title {
+  font-size: 12.5px;
+  font-weight: 570;
+  color: var(--text);
+}
+
+.cliped__len {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.cliped__len b {
+  color: var(--accent);
+  font-weight: 570;
+}
+
+/* Franja de la grabacion entera: da la escala del trozo elegido de un vistazo. */
+.cliped__bar {
+  position: relative;
+  height: 26px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.cliped__sel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  border-left: 2px solid var(--accent);
+  border-right: 2px solid var(--accent);
+  transition: left 0.12s var(--ease), width 0.12s var(--ease);
+}
+
+.cliped__cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--text);
+  opacity: 0.85;
+}
+
+.cliped__edges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+}
+
+.cliped__edge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cliped__label {
+  min-width: 42px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.cliped__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cliped__aspect,
+.cliped__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cliped__warn {
+  font-size: 11.5px;
+  color: var(--warn);
+}
+
+.cliped__warn--soft {
+  color: var(--text-3);
 }

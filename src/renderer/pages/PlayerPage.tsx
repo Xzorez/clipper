@@ -16,6 +16,7 @@ import {
 } from '../lib/events';
 import { VideoPlayer, VideoPlayerHandle } from '../components/VideoPlayer';
 import { IconBack, IconScissors } from '../components/Icons';
+import { ClipEditor, ClipAspect, ClipDraft } from '../components/ClipEditor';
 import { Timeline } from '../components/Timeline';
 
 export interface PlayerPageProps {
@@ -41,6 +42,8 @@ export function PlayerPage({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [creatingClip, setCreatingClip] = useState(false);
+  /** Recorte en curso. Mientras no sea null, el editor esta abierto. */
+  const [clipDraft, setClipDraft] = useState<ClipDraft | null>(null);
   const [activeEventId, setActiveEventId] = useState<string | null>(null);
   const [visibleTypes, setVisibleTypes] = useState<Set<GameEventType>>(
     () => new Set(DEFAULT_VISIBLE_TYPES),
@@ -123,13 +126,39 @@ export function PlayerPage({
     });
   }, []);
 
-  const createClip = useCallback(
-    async (centerSeconds: number, label: string) => {
-      if (!recording) return;
+  /**
+   * Abre el editor alrededor de un instante.
+   *
+   * Se parte de unos margenes razonables en vez de un punto suelto: casi
+   * siempre hay que ajustar poco, y empezar con el clip vacio obligaria a fijar
+   * las dos puntas antes de ver nada.
+   */
+  const openClipEditor = useCallback(
+    (centerSeconds: number) => {
+      const total = recording?.duration ?? 0;
+      setClipDraft({
+        start: Math.max(0, centerSeconds - 10),
+        end: Math.min(total || centerSeconds + 5, centerSeconds + 5),
+      });
+    },
+    [recording],
+  );
+
+  const exportClip = useCallback(
+    async (aspect: ClipAspect) => {
+      if (!recording || !clipDraft) return;
       setCreatingClip(true);
       try {
-        await api.createClip({ recordingId: recording.id, centerSeconds, title: label });
-        onNotify('Clip creado', `Se ha guardado el clip de ${label}.`);
+        await api.createClip({
+          recordingId: recording.id,
+          centerSeconds: (clipDraft.start + clipDraft.end) / 2,
+          startSeconds: clipDraft.start,
+          endSeconds: clipDraft.end,
+          aspect,
+          title: `minuto ${formatTime(clipDraft.start)}`,
+        });
+        onNotify('Clip creado', `${(clipDraft.end - clipDraft.start).toFixed(1)}s guardados.`);
+        setClipDraft(null);
         onClipCreated();
       } catch (err) {
         onNotify('No se ha podido crear el clip', (err as Error).message);
@@ -137,7 +166,7 @@ export function PlayerPage({
         setCreatingClip(false);
       }
     },
-    [recording, onNotify, onClipCreated],
+    [recording, clipDraft, onNotify, onClipCreated],
   );
 
   if (loading) {
@@ -175,11 +204,9 @@ export function PlayerPage({
         <button
           className="btn btn--sm"
           disabled={creatingClip}
-          onClick={() =>
-            void createClip(playerRef.current?.getCurrentTime() ?? 0, `minuto ${formatTime(currentTime)}`)
-          }
+          onClick={() => openClipEditor(playerRef.current?.getCurrentTime() ?? currentTime)}
         >
-          {creatingClip ? 'Creando...' : 'Crear clip aqui'}
+          Crear clip aqui
         </button>
       </div>
 
@@ -211,6 +238,19 @@ export function PlayerPage({
           onTimeUpdate={setCurrentTime}
           onDurationChange={setDuration}
           onError={setError}
+        />
+      )}
+
+      {clipDraft && (
+        <ClipEditor
+          duration={duration || recording.duration || 0}
+          draft={clipDraft}
+          currentTime={currentTime}
+          busy={creatingClip}
+          onChange={setClipDraft}
+          onSeek={(seconds) => playerRef.current?.seek(seconds)}
+          onCancel={() => setClipDraft(null)}
+          onExport={(aspect) => void exportClip(aspect)}
         />
       )}
 
@@ -270,12 +310,7 @@ export function PlayerPage({
           activeEventId={activeEventId}
           creatingClip={creatingClip}
           onSelect={seekToEvent}
-          onCreateClip={(event) =>
-            void createClip(
-              event.videoTime,
-              `${EVENT_VISUALS[event.type].label} ${formatTime(event.videoTime)}`,
-            )
-          }
+          onCreateClip={(event) => openClipEditor(event.videoTime)}
         />
       </div>
     </div>

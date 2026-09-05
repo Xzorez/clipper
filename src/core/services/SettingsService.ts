@@ -45,6 +45,7 @@ export function defaultSettings(videosDir: string): AppSettings {
        * la pantalla de configuracion viendo si el marcador cae antes o despues
        * de la accion.
        */
+      audioHighlights: true,
       latencyOffsetMs: {
         valorant: 250,
         rainbowsix: 300,

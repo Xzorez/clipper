@@ -69,6 +69,14 @@ export enum GameEventType {
   ROUND_START = 'ROUND_START',
   ROUND_END = 'ROUND_END',
   BOOKMARK = 'BOOKMARK',
+  /**
+   * Momento deducido del sonido de la grabacion, ya terminada la partida.
+   *
+   * Tipo propio y no BOOKMARK a proposito: un marcador lo puso una persona y
+   * un destacado es una conjetura nuestra. Quien mira la linea temporal tiene
+   * que poder distinguir lo que se sabe de lo que se supone.
+   */
+  HIGHLIGHT = 'HIGHLIGHT',
 }
 
 /** Orden de prioridad visual en la timeline cuando varios eventos colisionan. */
@@ -79,6 +87,8 @@ export const EVENT_PRIORITY: Record<GameEventType, number> = {
   [GameEventType.KNOCKED_OUT]: 80,
   [GameEventType.ASSIST]: 70,
   [GameEventType.BOOKMARK]: 60,
+  // Por debajo del marcador manual: si coinciden, manda el que puso la persona.
+  [GameEventType.HIGHLIGHT]: 55,
   [GameEventType.MATCH_START]: 50,
   [GameEventType.MATCH_END]: 50,
   [GameEventType.ROUND_START]: 20,
@@ -267,6 +277,13 @@ export interface RecordingSettings {
 }
 
 export interface EventSettings {
+  /**
+   * Deducir momentos destacados del sonido al terminar de grabar.
+   *
+   * Solo se aplica a partidas sin eventos reales del juego. Ahi no hay nada
+   * que perder: la alternativa es una linea temporal vacia.
+   */
+  audioHighlights: boolean;
   detectKills: boolean;
   detectDeaths: boolean;
   detectHeadshots: boolean;

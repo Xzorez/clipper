@@ -17,6 +17,7 @@ import { ScreenRecorder, StopRecordingResult } from './ScreenRecorder';
 import { DiskSpaceGuard } from './DiskSpaceGuard';
 import { SidecarStore } from './SidecarStore';
 import { ThumbnailService } from '../services/ThumbnailService';
+import { HighlightService } from '../services/HighlightService';
 import { createLogger } from '../logging/Logger';
 
 const log = createLogger('Recording');
@@ -84,6 +85,8 @@ export class RecordingManager extends EventEmitter {
   private readonly diskGuard: DiskSpaceGuard;
   private readonly thumbnails: ThumbnailService;
   private readonly audio?: AudioSource;
+  private readonly highlights?: HighlightService;
+  private settingsForHighlights: AppSettings['events'] | null = null;
 
   private active: ActiveRecording | null = null;
   /** Arranque en curso que aun no ha fijado `active`. Ver `start()`. */
@@ -101,6 +104,8 @@ export class RecordingManager extends EventEmitter {
     thumbnails: ThumbnailService;
     /** Opcional: sin el, se graba sin sonido. */
     audio?: AudioSource;
+    /** Opcional: deduce momentos del sonido cuando el juego no da eventos. */
+    highlights?: HighlightService;
   }) {
     super();
     this.db = deps.db;
@@ -110,6 +115,7 @@ export class RecordingManager extends EventEmitter {
     this.diskGuard = deps.diskGuard;
     this.thumbnails = deps.thumbnails;
     this.audio = deps.audio;
+    this.highlights = deps.highlights;
 
     this.wireRecorder();
     this.wireEvents();
@@ -274,6 +280,9 @@ export class RecordingManager extends EventEmitter {
 
     this.recordingClock.reset();
     this.eventManager.begin(adapter, settings.events);
+    // Se guarda para la fase de destacados, que ocurre despues de que la
+    // grabacion haya terminado y ya no hay ajustes a mano.
+    this.settingsForHighlights = settings.events;
 
     // El sonido se prepara antes que el video para poder pasarle la tuberia al
     // grabador. Si falla, se sigue adelante sin audio: una partida muda vale
@@ -484,6 +493,23 @@ export class RecordingManager extends EventEmitter {
     // Miniatura: si falla, la biblioteca muestra un marcador de posicion.
     if (fileExists) {
       void this.generateThumbnail(active.id, filePath, durationSec, events);
+      // Los destacados van despues y por su cuenta: la partida ya esta
+      // guardada y esto es un extra que puede tardar. Nadie espera por el.
+      if (this.settingsForHighlights?.audioHighlights) {
+        void this.detectHighlights({
+          recordingId: active.id,
+          game: active.game,
+          filePath,
+          events,
+          startedAtMs: result.startTimeEpochMs ?? active.startedAt,
+          endedAtMs: endedAt,
+          durationSec,
+          resolution: active.resolution,
+          fps: active.fps,
+          encoder: active.encoder,
+          status: finalStatus,
+        });
+      }
     }
 
     log.info(
@@ -498,6 +524,64 @@ export class RecordingManager extends EventEmitter {
     const record = this.safeGetRecording(active.id);
     this.emit('stopped', record);
     return record;
+  }
+
+  /**
+   * Busca momentos destacados en el sonido y los anade a la partida.
+   *
+   * Corre en segundo plano una vez la grabacion ya esta guardada: si falla o
+   * tarda, no cambia nada de lo que ya hay en disco.
+   */
+  private async detectHighlights(params: {
+    recordingId: string;
+    game: GameKey;
+    filePath: string;
+    events: GameEvent[];
+    startedAtMs: number;
+    endedAtMs: number;
+    durationSec: number;
+    resolution: string;
+    fps: number;
+    encoder: string;
+    status: RecordingRecord['status'];
+  }): Promise<void> {
+    if (!this.highlights) return;
+    try {
+      const found = await this.highlights.analyze({
+        game: params.game,
+        filePath: params.filePath,
+        existingEvents: params.events,
+        startedAtMs: params.startedAtMs,
+      });
+      if (found.length === 0) return;
+
+      this.db.insertEvents(params.recordingId, found);
+
+      // El sidecar se reescribe con todo junto: es la copia que permite
+      // recuperar la partida si la base de datos se pierde, y quedarse a
+      // medias la haria mentir.
+      const all = [...params.events, ...found].sort((a, b) => a.videoTime - b.videoTime);
+      SidecarStore.write(
+        params.filePath,
+        SidecarStore.build({
+          recordingId: params.recordingId,
+          game: params.game,
+          videoPath: params.filePath,
+          startedAtMs: params.startedAtMs,
+          endedAtMs: params.endedAtMs,
+          durationSec: params.durationSec,
+          resolution: params.resolution,
+          fps: params.fps,
+          encoder: params.encoder,
+          status: params.status,
+          events: all,
+        }),
+      );
+
+      this.emit('events-added', { recordingId: params.recordingId, count: found.length });
+    } catch (err) {
+      log.warn(`No se pudieron deducir destacados: ${(err as Error).message}`);
+    }
   }
 
   private async generateThumbnail(

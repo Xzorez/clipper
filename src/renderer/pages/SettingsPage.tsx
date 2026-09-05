@@ -294,6 +294,15 @@ function EventSettings({
           <Row label="Detectar rondas" hint="Marcadores de inicio y fin de ronda.">
             <Switch value={e.detectRounds} onChange={(v) => onChange({ events: { detectRounds: v } })} />
           </Row>
+          <Row
+            label="Destacados por sonido"
+            hint="Al terminar de grabar, busca en el audio los momentos que destacan sobre el resto y los marca. Solo en partidas sin eventos del juego, y solo si se grabo sonido."
+          >
+            <Switch
+              value={e.audioHighlights}
+              onChange={(v) => onChange({ events: { audioHighlights: v } })}
+            />
+          </Row>
         </div>
       </div>
 

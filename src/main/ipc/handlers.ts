@@ -147,12 +147,18 @@ export function registerIpcHandlers(context: AppContext, getWindow: WindowGetter
       centerSeconds: number;
       secondsBefore?: number;
       secondsAfter?: number;
+      startSeconds?: number;
+      endSeconds?: number;
+      aspect?: 'original' | 'vertical';
       title?: string;
     };
     const settings = context.settings.get();
     const result = await context.clips.create({
       recordingId: request.recordingId,
       centerSeconds: request.centerSeconds,
+      startSeconds: request.startSeconds,
+      endSeconds: request.endSeconds,
+      aspect: request.aspect,
       secondsBefore: request.secondsBefore ?? settings.clips.secondsBefore,
       secondsAfter: request.secondsAfter ?? settings.clips.secondsAfter,
       title: request.title,

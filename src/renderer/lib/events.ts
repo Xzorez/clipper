@@ -20,6 +20,12 @@ export const EVENT_VISUALS: Record<GameEventType, EventVisual> = {
   [GameEventType.ASSIST]: { icon: '🤝', color: 'var(--assist)', label: 'Asistencia', filterable: true },
   [GameEventType.KNOCKED_OUT]: { icon: '🩹', color: 'var(--knocked)', label: 'Derribado', filterable: true },
   [GameEventType.BOOKMARK]: { icon: '🔖', color: 'var(--bookmark)', label: 'Marcador', filterable: true },
+  [GameEventType.HIGHLIGHT]: {
+    icon: '✦',
+    color: 'var(--highlight)',
+    label: 'Destacado',
+    filterable: true,
+  },
   [GameEventType.RESPAWN]: { icon: '↻', color: 'var(--round)', label: 'Reaparicion', filterable: false },
   [GameEventType.MATCH_START]: { icon: '▶', color: 'var(--round)', label: 'Inicio de partida', filterable: false },
   [GameEventType.MATCH_END]: { icon: '⏹', color: 'var(--round)', label: 'Fin de partida', filterable: false },
@@ -35,6 +41,7 @@ export const DEFAULT_VISIBLE_TYPES: GameEventType[] = [
   GameEventType.ASSIST,
   GameEventType.KNOCKED_OUT,
   GameEventType.BOOKMARK,
+  GameEventType.HIGHLIGHT,
 ];
 
 /** Agrupacion de "Otros" en los filtros. */

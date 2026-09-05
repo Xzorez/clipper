@@ -17,6 +17,11 @@ export interface CreateClipRequest {
   centerSeconds: number;
   secondsBefore?: number;
   secondsAfter?: number;
+  /** Recorte exacto. Tiene prioridad sobre centro y margenes. */
+  startSeconds?: number;
+  endSeconds?: number;
+  /** 'vertical' recorta a 9:16 para compartir desde el movil. */
+  aspect?: 'original' | 'vertical';
   title?: string;
 }
 
