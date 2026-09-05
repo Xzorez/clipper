@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import { GAME_DISPLAY_NAMES, GameKey, RecordingRecord } from '@shared/types';
+import { RecordingRecord } from '@shared/types';
 import { api } from '../lib/api';
 import { RecordingCard } from '../components/RecordingCard';
-import { IconFilm, IconMore } from '../components/Icons';
+import { GameFilter, GameFilterValue } from '../components/GameFilter';
+import { IconMore } from '../components/Icons';
 
 export interface LibraryPageProps {
   recordings: RecordingRecord[];
@@ -11,137 +12,107 @@ export interface LibraryPageProps {
   onNotify: (title: string, message: string) => void;
 }
 
-const GAME_FILTERS: Array<{ key: GameKey | 'all'; label: string }> = [
-  { key: 'all', label: 'Todos' },
-  { key: 'valorant', label: 'VALORANT' },
-  { key: 'rainbowsix', label: 'Rainbow Six' },
-  { key: 'lol', label: 'League of Legends' },
-  { key: 'generic', label: 'Otros' },
-];
-
+/**
+ * Biblioteca de partidas.
+ *
+ * Mosaico y no lista: lo que distingue una partida de otra es la imagen y la
+ * cantidad de accion, y eso una fila de texto no lo cuenta.
+ */
 export function LibraryPage({
   recordings,
   onOpenRecording,
   onRefresh,
   onNotify,
 }: LibraryPageProps) {
-  const [filter, setFilter] = useState<GameKey | 'all'>('all');
-  const [selected, setSelected] = useState<string | null>(null);
+  const [filter, setFilter] = useState<GameFilterValue>('all');
+  const [menu, setMenu] = useState<string | null>(null);
 
   const filtered = useMemo(
     () => (filter === 'all' ? recordings : recordings.filter((r) => r.game === filter)),
     [recordings, filter],
   );
 
-  const totals = useMemo(() => {
-    return filtered.reduce(
-      (acc, item) => {
-        acc.kills += item.summary?.kills ?? 0;
-        acc.deaths += item.summary?.deaths ?? 0;
-        acc.headshots += item.summary?.headshots ?? 0;
-        acc.seconds += item.duration ?? 0;
-        return acc;
-      },
-      { kills: 0, deaths: 0, headshots: 0, seconds: 0 },
-    );
-  }, [filtered]);
-
   const remove = async (id: string, deleteFile: boolean) => {
+    setMenu(null);
     try {
       await api.deleteRecording(id, deleteFile);
-      onNotify('Grabacion eliminada', deleteFile ? 'Se ha borrado tambien el fichero.' : 'Se ha quitado de la biblioteca.');
-      setSelected(null);
       onRefresh();
+      onNotify(
+        'Partida borrada',
+        deleteFile ? 'Se ha borrado tambien el video.' : 'El video sigue en la carpeta.',
+      );
     } catch (err) {
-      onNotify('No se ha podido eliminar', (err as Error).message);
+      onNotify('No se ha podido borrar', (err as Error).message);
     }
   };
 
   return (
-    <div>
-      <h1 className="page__title">Mis partidas</h1>
-      <p className="page__sub">
-        {filtered.length} grabacion{filtered.length === 1 ? '' : 'es'}
-        {totals.seconds > 0 && ` · ${Math.round(totals.seconds / 60)} minutos`}
-        {totals.kills > 0 && ` · ${totals.kills} kills en total`}
-      </p>
-
-      <div className="tabs">
-        {GAME_FILTERS.map((item) => (
-          <button
-            key={item.key}
-            className={`tab${filter === item.key ? ' tab--on' : ''}`}
-            onClick={() => setFilter(item.key)}
-          >
-            {item.label}
-            <span className="tab__n">
-              {item.key === 'all'
-                ? recordings.length
-                : recordings.filter((r) => r.game === item.key).length}
-            </span>
-          </button>
-        ))}
+    <>
+      <div className="section-h">
+        <h1 className="title">Partidas</h1>
+        <div className="hair" />
+        <GameFilter recordings={recordings} value={filter} onChange={setFilter} />
       </div>
 
       {filtered.length === 0 ? (
         <div className="empty">
-          <IconFilm size={32} className="empty__mark" />
-          <div className="empty__title">
-            {filter === 'all'
-              ? 'Todavia no hay partidas'
-              : `Sin partidas de ${GAME_DISPLAY_NAMES[filter as GameKey]}`}
+          <div className="empty__title">Todavia no hay partidas</div>
+          <div className="empty__hint">
+            Abre un juego y Clipper empezara a grabar sola. Lo que grabe aparecera aqui.
           </div>
         </div>
       ) : (
-        <div className="grid">
-          {filtered.map((item) => (
-            <div key={item.id} style={{ position: 'relative' }}>
-              <RecordingCard recording={item} onOpen={onOpenRecording} />
+        <div className="grid-recs">
+          {filtered.map((recording) => (
+            <div key={recording.id} style={{ position: 'relative', minWidth: 0 }}>
+              <RecordingCard
+                recording={recording}
+                onOpen={() => onOpenRecording(recording.id)}
+              />
+
               <button
-                className="btn btn--sm btn--quiet"
-                style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.6)' }}
+                className="ctl"
+                title="Mas opciones"
+                style={{ position: 'absolute', top: 8, right: 8, width: 26, height: 26 }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setSelected(selected === item.id ? null : item.id);
+                  setMenu(menu === recording.id ? null : recording.id);
                 }}
-                title="Opciones"
               >
                 <IconMore size={14} />
               </button>
 
-              {selected === item.id && (
+              {menu === recording.id && (
                 <div
-                  className="card"
+                  className="panel"
                   style={{
                     position: 'absolute',
                     top: 38,
-                    right: 6,
+                    right: 8,
                     zIndex: 20,
-                    padding: 8,
-                    minWidth: 210,
+                    padding: 6,
+                    gap: 2,
                     boxShadow: '0 16px 40px rgba(0,0,0,0.6)',
                   }}
                 >
                   <button
-                    className="btn btn--sm btn--quiet"
-                    style={{ width: '100%', justifyContent: 'flex-start' }}
-                    onClick={() => void api.revealPath(item.filePath).catch(() => undefined)}
+                    className="btn btn--quiet btn--sm"
+                    onClick={() => void api.revealPath(recording.filePath).catch(() => undefined)}
                   >
                     Ver en la carpeta
                   </button>
                   <button
-                    className="btn btn--sm btn--quiet"
-                    style={{ width: '100%', justifyContent: 'flex-start' }}
-                    onClick={() => void remove(item.id, false)}
+                    className="btn btn--quiet btn--sm"
+                    onClick={() => void remove(recording.id, false)}
                   >
-                    Quitar de la biblioteca
+                    Quitar de la lista
                   </button>
                   <button
-                    className="btn btn--sm btn--danger"
-                    style={{ width: '100%', justifyContent: 'flex-start', marginTop: 4 }}
-                    onClick={() => void remove(item.id, true)}
+                    className="btn btn--quiet btn--sm"
+                    style={{ color: 'var(--danger)' }}
+                    onClick={() => void remove(recording.id, true)}
                   >
-                    Borrar tambien el video
+                    Borrar con el video
                   </button>
                 </div>
               )}
@@ -149,6 +120,6 @@ export function LibraryPage({
           ))}
         </div>
       )}
-    </div>
+    </>
   );
 }

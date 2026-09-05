@@ -1,4 +1,4 @@
-import { GameEventType } from '@shared/types';
+import { GameEventType, GameKey } from '@shared/types';
 
 export interface EventVisual {
   icon: string;
@@ -87,4 +87,37 @@ export function formatDateShort(epochMs: number): string {
     month: '2-digit',
     year: 'numeric',
   });
+}
+
+/**
+ * Etiqueta corta de un evento para la lista de momentos.
+ *
+ * Se distingue a proposito quien puso cada marca: `F9` lo puso una persona y
+ * `AUDIO` lo dedujo la aplicacion del sonido. Mezclarlos haria pasar una
+ * conjetura por un hecho.
+ */
+export function eventTag(type: GameEventType): string {
+  switch (type) {
+    case GameEventType.BOOKMARK:
+      return 'F9';
+    case GameEventType.HIGHLIGHT:
+      return 'AUDIO';
+    case GameEventType.HEADSHOT:
+      return 'HS';
+    case GameEventType.KNOCKED_OUT:
+      return 'DERRIBO';
+    default:
+      return EVENT_VISUALS[type].label.toUpperCase();
+  }
+}
+
+/** Abreviatura del juego para el distintivo de la miniatura. */
+export function gameShort(game: GameKey): string {
+  const short: Record<GameKey, string> = {
+    valorant: 'val',
+    rainbowsix: 'r6',
+    lol: 'lol',
+    generic: 'juego',
+  };
+  return short[game] ?? String(game);
 }

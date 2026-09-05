@@ -7,17 +7,22 @@ import {
   RecordingRecord,
 } from '@shared/types';
 import { api } from '../lib/api';
-import {
-  DEFAULT_VISIBLE_TYPES,
-  EVENT_VISUALS,
-  OTHER_TYPES,
-  formatDate,
-  formatTime,
-} from '../lib/events';
+import { DEFAULT_VISIBLE_TYPES, formatDate, formatTime, gameShort } from '../lib/events';
 import { VideoPlayer, VideoPlayerHandle } from '../components/VideoPlayer';
-import { IconBack, IconScissors } from '../components/Icons';
 import { ClipEditor, ClipAspect, ClipDraft } from '../components/ClipEditor';
 import { Timeline } from '../components/Timeline';
+
+/** Lo que la pagina le presta a la barra superior mientras esta abierta. */
+export interface PlayerHeader {
+  title: string;
+  kills: number;
+  deaths: number;
+  assists: number;
+  duration: number;
+  clipBusy: boolean;
+  onFolder: () => void;
+  onClip: () => void;
+}
 
 export interface PlayerPageProps {
   recordingId: string;
@@ -25,14 +30,23 @@ export interface PlayerPageProps {
   onBack: () => void;
   onNotify: (title: string, message: string) => void;
   onClipCreated: () => void;
+  onHeader: (header: PlayerHeader | null) => void;
 }
 
+/**
+ * Detalle de una partida.
+ *
+ * Tres zonas con pesos distintos: el video manda, el editor de clip vive al
+ * lado porque sacar clips es lo que se viene a hacer, y la linea temporal
+ * ocupa el ancho completo abajo, que es donde se lee la partida.
+ */
 export function PlayerPage({
   recordingId,
   settings,
   onBack,
   onNotify,
   onClipCreated,
+  onHeader,
 }: PlayerPageProps) {
   const playerRef = useRef<VideoPlayerHandle>(null);
   const [recording, setRecording] = useState<RecordingRecord | null>(null);
@@ -41,10 +55,9 @@ export function PlayerPage({
   const [currentTime, setCurrentTime] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [creatingClip, setCreatingClip] = useState(false);
-  /** Recorte en curso. Mientras no sea null, el editor esta abierto. */
-  const [clipDraft, setClipDraft] = useState<ClipDraft | null>(null);
-  const [activeEventId, setActiveEventId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [aspect, setAspect] = useState<ClipAspect>('original');
+  const [draft, setDraft] = useState<ClipDraft>({ start: 0, end: 15 });
   const [visibleTypes, setVisibleTypes] = useState<Set<GameEventType>>(
     () => new Set(DEFAULT_VISIBLE_TYPES),
   );
@@ -63,12 +76,9 @@ export function PlayerPage({
         if (cancelled) return;
         setRecording(rec);
         setEvents(evts);
-        if (rec.duration) setDuration(rec.duration);
-        if (rec.missingFile) {
-          setError(
-            'El fichero de video ya no esta en disco. Los eventos de la partida se ' +
-              'conservan, pero no hay imagen que reproducir.',
-          );
+        if (rec?.duration) {
+          setDuration(rec.duration);
+          setDraft({ start: 0, end: Math.min(15, rec.duration) });
         }
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
@@ -82,347 +92,164 @@ export function PlayerPage({
     };
   }, [recordingId]);
 
-  /** Resumen calculado a partir de los eventos guardados, nunca a mano. */
-  const summary = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const event of events) counts[event.type] = (counts[event.type] ?? 0) + 1;
-    return counts;
-  }, [events]);
-
-  const counts = useMemo(() => {
-    const map = new Map<GameEventType, number>();
-    for (const event of events) map.set(event.type, (map.get(event.type) ?? 0) + 1);
-    return map;
-  }, [events]);
-
-  /**
-   * Salto al evento. Si la opcion esta activa, se retrocede unos segundos para
-   * ver el contexto previo en lugar de caer justo en el instante del disparo.
-   */
-  const seekToEvent = useCallback(
-    (event: GameEvent) => {
-      const offset =
-        settings?.ui.playFromBeforeEnabled === false ? 0 : (settings?.ui.playFromSecondsBefore ?? 3);
-      const target = Math.max(0, event.videoTime - offset);
-      playerRef.current?.seek(target, true);
-      setActiveEventId(event.id);
+  const seek = useCallback(
+    (seconds: number, play = false) => {
+      const lead =
+        settings?.ui.playFromBeforeEnabled ? settings.ui.playFromSecondsBefore : 0;
+      playerRef.current?.seek(Math.max(0, seconds - lead), play);
     },
     [settings],
   );
 
-  const seekToTime = useCallback((seconds: number) => {
-    playerRef.current?.seek(seconds, false);
-  }, []);
+  const exportClip = useCallback(async () => {
+    if (!recording) return;
+    setBusy(true);
+    try {
+      await api.createClip({
+        recordingId: recording.id,
+        centerSeconds: (draft.start + draft.end) / 2,
+        startSeconds: draft.start,
+        endSeconds: draft.end,
+        aspect,
+        title: `${gameLabel(recording.game, recording.title)} ${formatTime(draft.start)}`,
+      });
+      onNotify('Clip guardado', `${(draft.end - draft.start).toFixed(1)}s en la carpeta de clips.`);
+      onClipCreated();
+    } catch (err) {
+      onNotify('No se ha podido crear el clip', (err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }, [recording, draft, aspect, onNotify, onClipCreated]);
 
-  const toggleType = useCallback((types: GameEventType[]) => {
-    setVisibleTypes((previous) => {
-      const next = new Set(previous);
-      const allOn = types.every((t) => next.has(t));
-      for (const type of types) {
-        if (allOn) next.delete(type);
-        else next.add(type);
-      }
+  const openFolder = useCallback(() => {
+    if (recording) void api.revealPath(recording.filePath).catch(() => undefined);
+  }, [recording]);
+
+  // La barra superior se convierte en la cabecera de esta partida mientras
+  // dura la visita, y se limpia al salir.
+  useEffect(() => {
+    if (!recording) return;
+    const summary = recording.summary;
+    onHeader({
+      title: `${gameShort(recording.game).toUpperCase()} · ${formatDate(recording.startedAt)}`,
+      kills: summary?.kills ?? 0,
+      deaths: summary?.deaths ?? 0,
+      assists: summary?.assists ?? 0,
+      duration: recording.duration ?? duration,
+      clipBusy: busy,
+      onFolder: openFolder,
+      onClip: () => void exportClip(),
+    });
+    return () => onHeader(null);
+  }, [recording, duration, busy, onHeader, openFolder, exportClip]);
+
+  const toggleType = useCallback((type: GameEventType) => {
+    setVisibleTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
       return next;
     });
   }, []);
 
-  /**
-   * Abre el editor alrededor de un instante.
-   *
-   * Se parte de unos margenes razonables en vez de un punto suelto: casi
-   * siempre hay que ajustar poco, y empezar con el clip vacio obligaria a fijar
-   * las dos puntas antes de ver nada.
-   */
-  const openClipEditor = useCallback(
-    (centerSeconds: number) => {
-      const total = recording?.duration ?? 0;
-      setClipDraft({
-        start: Math.max(0, centerSeconds - 10),
-        end: Math.min(total || centerSeconds + 5, centerSeconds + 5),
-      });
-    },
-    [recording],
-  );
-
-  const exportClip = useCallback(
-    async (aspect: ClipAspect) => {
-      if (!recording || !clipDraft) return;
-      setCreatingClip(true);
-      try {
-        await api.createClip({
-          recordingId: recording.id,
-          centerSeconds: (clipDraft.start + clipDraft.end) / 2,
-          startSeconds: clipDraft.start,
-          endSeconds: clipDraft.end,
-          aspect,
-          title: `minuto ${formatTime(clipDraft.start)}`,
-        });
-        onNotify('Clip creado', `${(clipDraft.end - clipDraft.start).toFixed(1)}s guardados.`);
-        setClipDraft(null);
-        onClipCreated();
-      } catch (err) {
-        onNotify('No se ha podido crear el clip', (err as Error).message);
-      } finally {
-        setCreatingClip(false);
-      }
-    },
-    [recording, clipDraft, onNotify, onClipCreated],
+  const visibleEvents = useMemo(
+    () => events.filter((event) => !event.beforeRecording),
+    [events],
   );
 
   if (loading) {
-    return <div className="empty">Cargando grabacion...</div>;
+    return (
+      <div className="empty">
+        <div className="empty__title">Cargando partida</div>
+      </div>
+    );
   }
 
   if (!recording) {
     return (
       <div className="empty">
-        <div className="empty__title">{error ?? 'No se ha encontrado la grabacion.'}</div>
-        <button className="btn" onClick={onBack}>
-          Volver
+        <div className="empty__title">No se ha encontrado la grabacion</div>
+        <button className="btn btn--quiet" onClick={onBack}>
+          Volver a partidas
         </button>
       </div>
     );
   }
-
-  const src = api.mediaUrl(recording.filePath);
-  const effectiveDuration = duration || recording.duration || 0;
 
   return (
     <div className="player">
-      <div className="bar">
-        <button className="btn btn--quiet btn--sm" onClick={onBack}>
-          <IconBack size={14} />
-          Volver
-        </button>
-        <div style={{ flex: 1 }} />
-        <button
-          className="btn btn--sm"
-          onClick={() => void api.revealPath(recording.filePath).catch(() => undefined)}
-        >
-          Ver en la carpeta
-        </button>
-        <button
-          className="btn btn--sm"
-          disabled={creatingClip}
-          onClick={() => openClipEditor(playerRef.current?.getCurrentTime() ?? currentTime)}
-        >
-          Crear clip aqui
-        </button>
-      </div>
-
-      {error && (
-        <div className="note note--danger">
-          <div>
-            <b>Problema con el video</b>
-            {error}
-          </div>
+      <div className="player__top">
+        <div className="player__main">
+          {/* Una partida recuperada tras un cierre inesperado no es una partida
+              normal: la duracion es aproximada y pueden faltar los ultimos
+              segundos. Callarlo haria pensar que el video esta mal cortado. */}
+          {recording.status === 'recovered' && (
+            <div className="note note--warn">
+              <div>
+                <b>Grabacion recuperada</b>
+                Se recupero tras un cierre inesperado. La duracion es aproximada y pueden faltar
+                los ultimos segundos, pero los momentos se conservaron.
+              </div>
+            </div>
+          )}
+          {error ? (
+            <div className="note note--danger">
+              <div>
+                <b>Problema con el video</b>
+                {error}
+              </div>
+            </div>
+          ) : (
+            <VideoPlayer
+              ref={playerRef}
+              src={api.mediaUrl(recording.filePath)}
+              duration={duration}
+              onTimeUpdate={setCurrentTime}
+              onDurationChange={(d) => d > 0 && setDuration(d)}
+              onError={setError}
+            />
+          )}
         </div>
-      )}
 
-      {recording.status === 'recovered' && (
-        <div className="note note--warn">
-          <div>
-            <b>Grabacion recuperada</b>
-            Se recupero tras un cierre inesperado. La duracion es aproximada y pueden faltar los
-            ultimos segundos, pero los eventos se conservaron.
-          </div>
-        </div>
-      )}
-
-      <SummaryBar recording={recording} summary={summary} />
-
-      {!recording.missingFile && (
-        <VideoPlayer
-          ref={playerRef}
-          src={src}
-          onTimeUpdate={setCurrentTime}
-          onDurationChange={setDuration}
-          onError={setError}
-        />
-      )}
-
-      {clipDraft && (
         <ClipEditor
-          duration={duration || recording.duration || 0}
-          draft={clipDraft}
+          duration={duration}
+          draft={draft}
           currentTime={currentTime}
-          busy={creatingClip}
-          onChange={setClipDraft}
-          onSeek={(seconds) => playerRef.current?.seek(seconds)}
-          onCancel={() => setClipDraft(null)}
-          onExport={(aspect) => void exportClip(aspect)}
+          events={visibleEvents}
+          busy={busy}
+          aspect={aspect}
+          onAspect={setAspect}
+          onChange={setDraft}
+          onSeek={(seconds) => seek(seconds)}
+          onExport={() => void exportClip()}
+        />
+      </div>
+
+      {visibleEvents.length === 0 ? (
+        <div className="lanes">
+          <div className="lanes__head">
+            <span className="eyebrow">Linea temporal</span>
+            <div className="hair" />
+          </div>
+          <div className="note">
+            <div>
+              {recording.game === 'generic'
+                ? 'Este juego no da eventos automaticos. Los momentos los marcas tu con el atajo mientras juegas, y tambien pueden salir del sonido al terminar.'
+                : 'Esta partida no tiene momentos guardados.'}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <Timeline
+          events={visibleEvents}
+          duration={duration || recording.duration || 0}
+          currentTime={currentTime}
+          visibleTypes={visibleTypes}
+          onToggleType={toggleType}
+          onSeek={(seconds) => seek(seconds, true)}
         />
       )}
-
-      <div className="tl">
-        <div className="tl__head">
-          <div className="chips">
-            {DEFAULT_VISIBLE_TYPES.map((type) => {
-              const visual = EVENT_VISUALS[type];
-              const active = visibleTypes.has(type);
-              const count = counts.get(type) ?? 0;
-              return (
-                <button
-                  key={type}
-                  className={`chip${active ? ' chip--on' : ''}`}
-                  style={active ? { color: visual.color } : undefined}
-                  onClick={() => toggleType([type])}
-                >
-                  <i style={{ background: visual.color }} />
-                  {visual.label}
-                  <span className="chip__n">{count}</span>
-                </button>
-              );
-            })}
-            <button
-              className={`chip${
-                OTHER_TYPES.every((t) => visibleTypes.has(t)) ? ' chip--on' : ''
-              }`}
-              onClick={() => toggleType(OTHER_TYPES)}
-            >
-              <i style={{ background: 'var(--round)' }} />
-              Otros
-              <span className="chip__n">
-                {OTHER_TYPES.reduce((sum, t) => sum + (counts.get(t) ?? 0), 0)}
-              </span>
-            </button>
-          </div>
-        </div>
-
-        <Timeline
-          events={events}
-          duration={effectiveDuration}
-          currentTime={currentTime}
-          visibleTypes={visibleTypes}
-          iconSize={settings?.ui.iconSize ?? 'medium'}
-          showLabels={settings?.ui.showLabels ?? false}
-          onSeek={seekToTime}
-        />
-      </div>
-
-      <div className="card">
-        <div className="section" style={{ marginTop: 0 }}>
-          Eventos de la partida
-        </div>
-        <EventList
-          events={events}
-          visibleTypes={visibleTypes}
-          activeEventId={activeEventId}
-          creatingClip={creatingClip}
-          onSelect={seekToEvent}
-          onCreateClip={(event) => openClipEditor(event.videoTime)}
-        />
-      </div>
-    </div>
-  );
-}
-
-function SummaryBar({
-  recording,
-  summary,
-}: {
-  recording: RecordingRecord;
-  summary: Record<string, number>;
-}) {
-  const isLol = recording.game === 'lol';
-  const stats: Array<{ label: string; value: number; color: string }> = [
-    { label: 'Kills', value: summary[GameEventType.KILL] ?? 0, color: 'var(--kill)' },
-    { label: 'Muertes', value: summary[GameEventType.DEATH] ?? 0, color: 'var(--death)' },
-  ];
-  if (isLol) {
-    stats.push({ label: 'Asistencias', value: summary[GameEventType.ASSIST] ?? 0, color: 'var(--assist)' });
-  } else {
-    stats.push({ label: 'Headshots', value: summary[GameEventType.HEADSHOT] ?? 0, color: 'var(--headshot)' });
-    if ((summary[GameEventType.KNOCKED_OUT] ?? 0) > 0) {
-      stats.push({
-        label: 'Derribos',
-        value: summary[GameEventType.KNOCKED_OUT] ?? 0,
-        color: 'var(--knocked)',
-      });
-    }
-  }
-
-  return (
-    <div className="summary">
-      <div>
-        <div className="summary__game">{gameLabel(recording.game, recording.title)}</div>
-        <div style={{ color: 'var(--text-2)', fontSize: 12 }}>
-          {formatDate(recording.startedAt)} · {formatTime(recording.duration ?? 0)}
-          {recording.resolution && ` · ${recording.resolution}`}
-          {recording.fps && ` · ${recording.fps} fps`}
-        </div>
-      </div>
-      <div style={{ flex: 1 }} />
-      {stats.map((stat) => (
-        <div className="stat" key={stat.label}>
-          <span className="stat__value" style={{ color: stat.color }}>
-            {stat.value}
-          </span>
-          <span className="stat__label">{stat.label}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function EventList({
-  events,
-  visibleTypes,
-  activeEventId,
-  creatingClip,
-  onSelect,
-  onCreateClip,
-}: {
-  events: GameEvent[];
-  visibleTypes: Set<GameEventType>;
-  activeEventId: string | null;
-  creatingClip: boolean;
-  onSelect: (event: GameEvent) => void;
-  onCreateClip: (event: GameEvent) => void;
-}) {
-  const filtered = events.filter((event) => visibleTypes.has(event.type));
-
-  if (filtered.length === 0) {
-    return (
-      <div className="empty" style={{ padding: '32px 16px' }}>
-        <div>
-          {events.length === 0
-            ? 'Esta grabacion no tiene eventos. Puede que el proveedor de eventos no estuviera activo durante la partida.'
-            : 'Ningun evento coincide con los filtros seleccionados.'}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="events">
-      {filtered.map((event) => {
-        const visual = EVENT_VISUALS[event.type];
-        return (
-          <div
-            key={event.id}
-            className={`ev${event.id === activeEventId ? ' ev--on' : ''}`}
-          >
-            <span className="ev__dot" style={{ background: visual.color }} />
-            <button
-              className="ev__name"
-              style={{ background: 'none', textAlign: 'left' }}
-              onClick={() => onSelect(event)}
-            >
-              {visual.label}
-            </button>
-            <span className="ev__t">{formatTime(event.videoTime)}</span>
-            <button
-              className="btn btn--sm btn--quiet"
-              disabled={creatingClip}
-              onClick={() => onCreateClip(event)}
-              title="Crear un clip alrededor de este evento"
-            >
-              <IconScissors size={14} />
-            </button>
-          </div>
-        );
-      })}
     </div>
   );
 }

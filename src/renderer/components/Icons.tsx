@@ -178,3 +178,40 @@ export function IconStop({ size = 16, className }: IconProps) {
     </svg>
   );
 }
+
+/* --- Controles de ventana -------------------------------------------------
+   Al quitar el marco del sistema hay que dibujarlos. Se mantienen las formas
+   que espera cualquiera en Windows: raya, cuadro y aspa.
+-------------------------------------------------------------------------- */
+
+export function IconMinimize({ size = 11, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" className={className} aria-hidden="true">
+      <rect x="1" y="5.5" width="10" height="1" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function IconMaximize({ size = 11, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" className={className} aria-hidden="true">
+      <rect
+        x="1.5"
+        y="1.5"
+        width="9"
+        height="9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1"
+      />
+    </svg>
+  );
+}
+
+export function IconClose({ size = 11, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" className={className} aria-hidden="true">
+      <path d="M2 2 L10 10 M10 2 L2 10" stroke="currentColor" strokeWidth="1.2" fill="none" />
+    </svg>
+  );
+}

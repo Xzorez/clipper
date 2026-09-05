@@ -1,8 +1,9 @@
-import { app, BrowserWindow, protocol, shell, session, desktopCapturer } from 'electron';
+import { app, BrowserWindow, protocol, shell, session, desktopCapturer, ipcMain } from 'electron';
 import { join } from 'node:path';
 import { serveLocalFile } from './rangeRequest';
 import { AppContext } from './AppContext';
 import { AppSettings, DetectionState } from '../shared/types';
+import { IPC } from '../shared/channels';
 import { registerIpcHandlers } from './ipc/handlers';
 import { TrayIcon, applyStartWithWindows } from './TrayIcon';
 import { loggerRoot, createLogger } from '../core/logging/Logger';
@@ -62,9 +63,13 @@ function createWindow(): void {
     height: 900,
     minWidth: 1024,
     minHeight: 680,
-    backgroundColor: '#0d0f14',
+    backgroundColor: '#101012',
     show: false,
     autoHideMenuBar: true,
+    // Sin marco: la barra superior del diseno incluye marca, navegacion,
+    // estado de grabacion y los controles de ventana. Una barra de titulo del
+    // sistema encima seria una segunda barra diciendo lo mismo peor.
+    frame: false,
     title: 'Clipper',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -193,6 +198,24 @@ function registerAudioCapturePermissions(): void {
   );
 }
 
+/**
+ * Minimizar, maximizar y cerrar desde la barra propia.
+ *
+ * Al quitar el marco del sistema, estos botones dejan de existir y hay que
+ * darlos: sin ellos la ventana no se podria ni cerrar.
+ */
+function registerWindowControls(): void {
+  ipcMain.on(IPC.WINDOW_MINIMIZE, () => mainWindow?.minimize());
+  ipcMain.on(IPC.WINDOW_MAXIMIZE, () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+  });
+  // Cerrar pasa por el mismo camino que la cruz del sistema, asi que respeta
+  // el ajuste de esconder en la bandeja en vez de salir.
+  ipcMain.on(IPC.WINDOW_CLOSE, () => mainWindow?.close());
+}
+
 app.on('second-instance', () => {
   // Abrir la aplicacion otra vez cuando ya esta en la bandeja significa
   // "muestramela", no "arranca otra".
@@ -209,6 +232,7 @@ app.whenReady().then(async () => {
 
   registerMediaProtocol();
   registerAudioCapturePermissions();
+  registerWindowControls();
 
   context = new AppContext();
   await context.initialize();

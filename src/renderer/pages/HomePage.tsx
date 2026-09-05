@@ -1,193 +1,291 @@
-import { DetectionState, LiveStatus, RecordingRecord } from '@shared/types';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  AppSettings,
+  DetectionState,
+  GameEvent,
+  GameEventType,
+  GameKey,
+  LiveStatus,
+  RecordingRecord,
+} from '@shared/types';
 import { api } from '../lib/api';
-import { formatTime } from '../lib/events';
+import { EVENT_VISUALS, eventTag, formatTime } from '../lib/events';
 import { RecordingCard } from '../components/RecordingCard';
-import { IconRecord, IconStop, IconFilm } from '../components/Icons';
+import { GameFilter, GameFilterValue } from '../components/GameFilter';
 
 export interface HomePageProps {
   status: LiveStatus | null;
+  settings: AppSettings | null;
   recent: RecordingRecord[];
   onOpenRecording: (id: string) => void;
   onNotify: (title: string, message: string) => void;
   onGoToLibrary: () => void;
 }
 
+/** Las cuatro cifras del marcador en vivo, en el orden del diseno. */
+const STATS = [
+  { key: 'kills', label: 'Kills', color: 'var(--kill)' },
+  { key: 'deaths', label: 'Muertes', color: 'var(--death)' },
+  { key: 'headshots', label: 'Headshots', color: 'var(--headshot)' },
+  { key: 'assists', label: 'Asistencias', color: 'var(--assist)' },
+] as const;
+
 /**
  * Pantalla de inicio.
  *
- * Deliberadamente sin avisos. Al entrar no hay nada que leer ni que cerrar: el
- * estado cabe en una linea, y el detalle vive en Ajustes -> Diagnostico para
- * quien lo quiera. Solo se interrumpe al usuario cuando algo falla de verdad
- * mientras usa la aplicacion, y entonces con un aviso puntual que se va solo.
+ * Manda la partida en curso: si esta grabando, lo primero que se ve es el
+ * tiempo y el marcador, con los momentos que lleva detectados al lado. Si no,
+ * el bloque se repliega y el peso pasa al mosaico de partidas.
+ *
+ * Sin avisos al entrar. Solo se interrumpe cuando algo falla de verdad, y
+ * entonces con un aviso puntual que se va solo.
  */
 export function HomePage({
   status,
+  settings,
   recent,
   onOpenRecording,
   onNotify,
   onGoToLibrary,
 }: HomePageProps) {
+  const [live, setLive] = useState<GameEvent[]>([]);
+  const [filter, setFilter] = useState<GameFilterValue>('all');
+  const [busy, setBusy] = useState(false);
+
   const recording = status?.state === DetectionState.RECORDING;
-  const detected = status?.state === DetectionState.GAME_DETECTED;
+  const recordingId = status?.recordingId ?? null;
+
+  // Los momentos de la partida en curso llegan segun ocurren; al empezar otra
+  // se vacian, para no arrastrar los de la anterior.
+  useEffect(() => setLive([]), [recordingId]);
+  useEffect(() => api.onEvent((event) => setLive((prev) => [...prev, event])), []);
+
+  const filtered = useMemo(
+    () => (filter === 'all' ? recent : recent.filter((r) => r.game === filter)),
+    [recent, filter],
+  );
+
+  const elapsed = status?.elapsed ?? 0;
+  const summary = status?.summary;
+
+  async function run(action: () => Promise<unknown>, error: string) {
+    setBusy(true);
+    try {
+      await action();
+    } catch (err) {
+      onNotify(error, (err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
-    <div>
-      <h1 className="page__title">Inicio</h1>
-      <p className="page__sub">Tus partidas, grabadas enteras y con lo importante marcado.</p>
-
-      <div className={`stage${recording ? ' stage--live' : ''}`}>
-        <div className="stage__head">
-          <div>
-            <div className="state">
-              <span className={`dot ${recording ? 'dot--live' : detected ? 'dot--ready' : ''}`} />
-              {recording ? 'Grabando' : detected ? 'Juego detectado' : 'En espera'}
-            </div>
-
-            {recording ? (
-              <>
-                <div className="timer">{formatTime(status?.elapsed ?? 0)}</div>
-                <div className="stage__game">{status?.gameName}</div>
-              </>
-            ) : (
-              <>
-                <div className="timer" style={{ color: 'var(--text-3)' }}>
-                  {detected ? status?.gameName : '00:00'}
-                </div>
-                <div className="stage__hint">
-                  {detected
-                    ? 'Listo para grabar esta partida.'
-                    : 'Abre un juego y empezara sola. VALORANT, Rainbow Six Siege y League of Legends ademas marcan los momentos solos.'}
-                </div>
-              </>
-            )}
+    <>
+      <div className="home-top">
+        <section className="panel hero">
+          <div className="hero__head">
+            <span className="eyebrow">Partida en curso</span>
+            <span
+              className={`hero__auto${settings?.recording.autoRecord ? '' : ' hero__auto--off'}`}
+            >
+              Auto · {settings?.recording.autoRecord ? 'on' : 'off'}
+            </span>
           </div>
 
-          <div>
+          <div className="hero__main">
+            <div className={`timer${recording ? '' : ' timer--idle'}`}>
+              {formatTime(recording ? elapsed : 0)}
+            </div>
+            <div className="hero__game">
+              <span className="hero__name">
+                {status?.gameName ?? (status?.state === DetectionState.GAME_DETECTED
+                  ? 'Juego detectado'
+                  : 'En espera')}
+              </span>
+              <span className="hero__sub">
+                {recording
+                  ? `${status?.recorder.backend === 'overwolf' ? 'Captura del juego' : 'Captura de pantalla'} · ${settings?.recording.resolution ?? 1080}p${settings?.recording.fps ?? 60}`
+                  : 'Abre un juego y empezara sola. VALORANT, Rainbow Six y League of Legends marcan los momentos solos.'}
+              </span>
+            </div>
+          </div>
+
+          {/* Sin grabar no hay marcador que ensenar: cuatro ceros enormes solo
+              hacen que la pantalla parezca vacia. */}
+          {recording && summary && (
+            <div className="stats">
+              {STATS.map(({ key, label, color }) => (
+                <div className="stats__cell" key={key}>
+                  <span className="stats__n" style={{ color }}>
+                    {summary[key]}
+                  </span>
+                  <span className="stats__l">{label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="hero__actions">
             {recording ? (
-              <button
-                className="btn btn--danger"
-                onClick={() =>
-                  void api
-                    .stopRecording()
-                    .catch((err) => onNotify('No se ha podido detener', (err as Error).message))
-                }
-              >
-                <IconStop size={13} />
-                Detener
-              </button>
+              <>
+                <button
+                  className="btn"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      const ok = await api.addBookmark();
+                      if (ok) onNotify('Momento marcado', 'Lo encontraras en la linea temporal.');
+                    }, 'No se ha podido marcar')
+                  }
+                >
+                  Marcar momento · {settings?.hotkeys.bookmark ?? 'F9'}
+                </button>
+                <button
+                  className="btn btn--ghost"
+                  disabled={busy}
+                  onClick={() => void run(() => api.stopRecording(), 'No se ha podido detener')}
+                >
+                  Detener
+                </button>
+              </>
             ) : (
               <button
-                className="btn btn--primary"
-                onClick={() =>
-                  void api
-                    .startRecording()
-                    .catch((err) => onNotify('No se ha podido iniciar', (err as Error).message))
-                }
+                className="btn"
+                disabled={busy}
+                onClick={() => void run(() => api.startRecording(), 'No se ha podido grabar')}
               >
-                <IconRecord size={12} />
                 Grabar ahora
               </button>
             )}
           </div>
+
+          <div className="hero__foot">
+            {recording && (
+              <div className="live">
+                <span className="live__label">En vivo</span>
+                <div className="live__track">
+                  {live.map((event) => (
+                    <span
+                      key={event.id}
+                      className="live__mark"
+                      title={`${EVENT_VISUALS[event.type].label} · ${formatTime(event.videoTime)}`}
+                      style={{
+                        left: `${elapsed > 0 ? Math.min(98, (event.videoTime / elapsed) * 100) : 0}%`,
+                        background: EVENT_VISUALS[event.type].color,
+                      }}
+                    />
+                  ))}
+                  <span className="live__now" />
+                </div>
+                <span className="live__n">{live.length} mom.</span>
+              </div>
+            )}
+
+            <div className="hero__status">
+              <span>
+                Captura <b>{status?.recorder.backend === 'overwolf' ? 'Overwolf' : 'FFmpeg'}</b>
+              </span>
+              <span>
+                Eventos <b>{status?.provider.provider === 'gep' ? 'GEP' : 'Nativo'}</b>
+              </span>
+              {status?.diskFreeGb != null && (
+                <span>
+                  Disco <b className="mono">{Math.round(status.diskFreeGb)} GB</b>
+                </span>
+              )}
+              <div className="hair" style={{ background: 'transparent' }} />
+              <span className="hero__keys">
+                <b className="kbd">{settings?.hotkeys.saveClip ?? 'F8'}</b> clip
+                <b className="kbd">{settings?.hotkeys.bookmark ?? 'F9'}</b> marcador
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="moments__head eyebrow">Momentos de esta partida</div>
+          <div className="moments__list">
+            {live.length === 0 ? (
+              <div className="empty" style={{ padding: '24px 12px' }}>
+                <div className="empty__hint">
+                  {recording
+                    ? 'Todavia no ha pasado nada. Los que marques con el atajo apareceran aqui.'
+                    : 'Aqui se iran apuntando los momentos de la partida mientras juegas.'}
+                </div>
+              </div>
+            ) : (
+              [...live]
+                .reverse()
+                .map((event) => (
+                  <button
+                    key={event.id}
+                    className="moment"
+                    style={{ borderLeftColor: EVENT_VISUALS[event.type].color }}
+                    onClick={() => recordingId && onOpenRecording(recordingId)}
+                  >
+                    <span className="moment__t">{formatTime(event.videoTime)}</span>
+                    <span className="moment__l">{EVENT_VISUALS[event.type].label}</span>
+                    <span className="moment__tag">{eventTag(event.type)}</span>
+                  </button>
+                ))
+            )}
+          </div>
+          <div className="moments__foot">
+            <button
+              className="btn btn--quiet btn--wide"
+              disabled={!recordingId}
+              onClick={() => recordingId && onOpenRecording(recordingId)}
+            >
+              Abrir la partida entera
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <section style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="section-h">
+          <h2>Mis partidas</h2>
+          <div className="hair" />
+          <GameFilter recordings={recent} value={filter} onChange={setFilter} />
         </div>
 
-        {recording && (
-          <div className="stats">
-            <Stat label="Kills" value={status?.summary.kills ?? 0} color="var(--kill)" />
-            <Stat label="Muertes" value={status?.summary.deaths ?? 0} color="var(--death)" />
-            <Stat label="Headshots" value={status?.summary.headshots ?? 0} color="var(--headshot)" />
-            <Stat label="Asistencias" value={status?.summary.assists ?? 0} color="var(--assist)" />
+        {filtered.length === 0 ? (
+          <div className="empty">
+            <div className="empty__title">Todavia no hay partidas</div>
+            <div className="empty__hint">
+              Abre un juego y Clipper empezara a grabar sola.
+            </div>
+          </div>
+        ) : (
+          <div className="grid-recs">
+            {filtered.slice(0, 8).map((recording) => (
+              <RecordingCard
+                key={recording.id}
+                recording={recording}
+                onOpen={() => onOpenRecording(recording.id)}
+              />
+            ))}
           </div>
         )}
 
-        <div className="strip">
-          <span>
-            Captura <b>{recorderLabel(status)}</b>
-          </span>
-          <span>
-            Eventos <b>{providerLabel(status)}</b>
-          </span>
-          {typeof status?.diskFreeGb === 'number' && (
-            <span>
-              Disco <b className="num">{status.diskFreeGb.toFixed(0)} GB</b>
-            </span>
-          )}
-          <span style={{ marginLeft: 'auto' }}>
-            <span className="kbd">F8</span> clip <span className="kbd">F9</span> marcador{' '}
-            <span className="kbd">F10</span> grabar
-          </span>
-        </div>
-      </div>
-
-      <div className="section">Ultimas partidas</div>
-
-      {recent.length === 0 ? (
-        <div className="empty">
-          <IconFilm size={34} className="empty__mark" />
-          <div className="empty__title">Todavia no hay partidas</div>
-          <div className="empty__hint">
-            En cuanto abras uno de los juegos soportados, Clipper empezara a grabar por su cuenta.
-          </div>
-        </div>
-      ) : (
-        <>
-          <div className="grid">
-            {recent.slice(0, 4).map((item) => (
-              <RecordingCard key={item.id} recording={item} onOpen={onOpenRecording} />
-            ))}
-          </div>
-          {recent.length > 4 && (
-            <button className="btn btn--quiet" style={{ marginTop: 16 }} onClick={onGoToLibrary}>
-              Ver todas
-            </button>
-          )}
-        </>
-      )}
-    </div>
+        {filtered.length > 8 && (
+          <button className="btn btn--quiet" onClick={onGoToLibrary}>
+            Ver las {filtered.length} partidas
+          </button>
+        )}
+      </section>
+    </>
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: number; color: string }) {
-  return (
-    <div>
-      <div className="stat__value" style={{ color }}>
-        {value}
-      </div>
-      <div className="stat__label">{label}</div>
-    </div>
-  );
-}
+/** Tipos que cuentan como "momento" en la tira en vivo. */
+export const MOMENT_TYPES: GameEventType[] = [
+  GameEventType.KILL,
+  GameEventType.DEATH,
+  GameEventType.HEADSHOT,
+  GameEventType.ASSIST,
+  GameEventType.BOOKMARK,
+  GameEventType.HIGHLIGHT,
+];
 
-function recorderLabel(status: LiveStatus | null): string {
-  if (!status || status.recorder.status === 'checking') return 'comprobando';
-  if (status.recorder.status === 'unavailable') return 'no disponible';
-  return status.recorder.backend === 'overwolf' ? 'Overwolf' : 'automatica';
-}
-
-function providerLabel(status: LiveStatus | null): string {
-  if (!status) return 'comprobando';
-  const name =
-    status.provider.provider === 'riot-live-client'
-      ? 'API de Riot'
-      : status.provider.provider === 'r6-replay'
-        ? 'repeticiones'
-        : status.provider.provider === 'valorant-match-api'
-          ? 'historial'
-          : 'GEP';
-
-  switch (status.provider.status) {
-    case 'connected':
-      return name;
-    case 'connecting':
-      return 'conectando';
-    case 'disconnected':
-      return `${name}, sin juego`;
-    case 'elevation-required':
-      return 'requiere administrador';
-    case 'error':
-      return 'error';
-    default:
-      // Sin GEP cada juego usa su propia fuente, que se activa al detectarlo.
-      return 'por juego';
-  }
-}
+export type { GameKey };

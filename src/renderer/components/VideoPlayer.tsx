@@ -3,14 +3,15 @@ import { formatTime } from '../lib/events';
 import {
   IconPlay,
   IconPause,
-  IconSkipBack,
-  IconSkipFwd,
   IconVolume,
   IconMute,
   IconFullscreen,
 } from './Icons';
 
-const SPEEDS = [0.25, 0.5, 1, 1.5, 2, 4];
+/** Velocidades del segmentado. Tres bastan; el resto era relleno. */
+const SPEEDS = [0.5, 1, 2] as const;
+/** Salto de los botones de retroceso y avance, en segundos. */
+const STEP = 5;
 
 export interface VideoPlayerHandle {
   /** Salta a un instante y opcionalmente reproduce. */
@@ -20,6 +21,7 @@ export interface VideoPlayerHandle {
 
 export interface VideoPlayerProps {
   src: string;
+  duration: number;
   onTimeUpdate: (seconds: number) => void;
   onDurationChange: (seconds: number) => void;
   onError: (message: string) => void;
@@ -33,197 +35,134 @@ export interface VideoPlayerProps {
  * acelerada por hardware y sin dependencias.
  *
  * El tiempo se propaga hacia arriba con requestAnimationFrame en vez de con el
- * evento timeupdate, que solo se dispara unas 4 veces por segundo y haria que
- * el cabezal de la timeline avanzara a tirones.
+ * evento timeupdate, que solo se dispara unas cuatro veces por segundo y haria
+ * que el cabezal de la linea temporal avanzara a tirones.
+ *
+ * La barra de progreso no esta aqui: vive en la linea temporal de abajo, que
+ * es la regla de la pantalla. Tener dos barras compitiendo era parte de lo que
+ * hacia que todo pesara igual.
  */
 export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(function VideoPlayer(
-  { src, onTimeUpdate, onDurationChange, onError },
+  { src, duration, onTimeUpdate, onDurationChange, onError },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const rafRef = useRef<number | null>(null);
+  const frameRef = useRef<number>(0);
   const [playing, setPlaying] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const [current, setCurrent] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [muted, setMuted] = useState(false);
   const [speed, setSpeed] = useState(1);
+  const [muted, setMuted] = useState(false);
+  const [current, setCurrent] = useState(0);
 
   useImperativeHandle(ref, () => ({
     seek: (seconds: number, play = false) => {
       const video = videoRef.current;
       if (!video) return;
-      video.currentTime = Math.max(0, Math.min(seconds, video.duration || seconds));
-      setCurrent(video.currentTime);
-      onTimeUpdate(video.currentTime);
+      video.currentTime = Math.max(0, seconds);
       if (play) void video.play().catch(() => undefined);
     },
     getCurrentTime: () => videoRef.current?.currentTime ?? 0,
   }));
 
-  // Bucle de animacion: mantiene el cabezal fluido mientras se reproduce.
+  // Bucle de refresco: solo mientras se reproduce, para no gastar en balde.
   useEffect(() => {
     const tick = () => {
       const video = videoRef.current;
-      if (video && !video.paused) {
+      if (video) {
         setCurrent(video.currentTime);
         onTimeUpdate(video.currentTime);
       }
-      rafRef.current = requestAnimationFrame(tick);
+      frameRef.current = requestAnimationFrame(tick);
     };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-    };
+    frameRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameRef.current);
   }, [onTimeUpdate]);
 
-  const togglePlay = useCallback(() => {
+  const toggle = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) void video.play().catch(() => undefined);
     else video.pause();
   }, []);
 
-  const skip = useCallback((delta: number) => {
+  const step = useCallback((delta: number) => {
     const video = videoRef.current;
-    if (!video) return;
-    video.currentTime = Math.max(0, Math.min(video.currentTime + delta, video.duration || 0));
-    setCurrent(video.currentTime);
-    onTimeUpdate(video.currentTime);
-  }, [onTimeUpdate]);
+    if (video) video.currentTime = Math.max(0, video.currentTime + delta);
+  }, []);
 
-  // Atajos de teclado dentro del reproductor.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return;
-      switch (event.key) {
-        case ' ':
-          event.preventDefault();
-          togglePlay();
-          break;
-        case 'ArrowLeft':
-          skip(event.shiftKey ? -1 : -5);
-          break;
-        case 'ArrowRight':
-          skip(event.shiftKey ? 1 : 5);
-          break;
-        case 'm':
-          setMuted((m) => !m);
-          break;
-        case 'f':
-          void videoRef.current?.requestFullscreen().catch(() => undefined);
-          break;
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [togglePlay, skip]);
+  const changeSpeed = useCallback((value: number) => {
+    setSpeed(value);
+    if (videoRef.current) videoRef.current.playbackRate = value;
+  }, []);
 
   return (
-    <div className="video">
-      <video
-        ref={videoRef}
-        src={src}
-        preload="metadata"
-        muted={muted}
-        onClick={togglePlay}
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onLoadedMetadata={(e) => {
-          const value = e.currentTarget.duration;
-          if (Number.isFinite(value)) {
-            setDuration(value);
-            onDurationChange(value);
+    <>
+      <div className="player__video">
+        <video
+          ref={videoRef}
+          src={src}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onLoadedMetadata={(e) => onDurationChange(e.currentTarget.duration || 0)}
+          onError={() =>
+            onError(
+              'No se ha podido reproducir el video. Puede que el fichero se haya movido, ' +
+                'borrado o quedado incompleto tras un cierre inesperado.',
+            )
           }
-        }}
-        onError={() => {
-          onError(
-            'No se ha podido reproducir el video. Puede que el fichero se haya movido, ' +
-              'borrado o quedado incompleto tras un cierre inesperado.',
-          );
-        }}
-      />
+          onClick={toggle}
+        />
+      </div>
 
       <div className="controls">
-        <button className="ctl" onClick={togglePlay} title="Reproducir / Pausa (Espacio)">
+        <button className="ctl ctl--play" onClick={toggle} title="Reproducir o pausar">
           {playing ? <IconPause size={15} /> : <IconPlay size={15} />}
         </button>
-        <button className="ctl" onClick={() => skip(-5)} title="Atras 5s (←)">
-          <IconSkipBack size={15} />
+        <button className="ctl" onClick={() => step(-STEP)} title={`Atras ${STEP}s`}>
+          −{STEP}
         </button>
-        <button className="ctl" onClick={() => skip(5)} title="Adelante 5s (→)">
-          <IconSkipFwd size={15} />
+        <button className="ctl" onClick={() => step(STEP)} title={`Adelante ${STEP}s`}>
+          +{STEP}
         </button>
 
-        <span className="time">
+        <span className="ctl__time">
           {formatTime(current)} / {formatTime(duration)}
         </span>
 
-        <input
-          className="scrub"
-          type="range"
-          min={0}
-          max={duration || 0}
-          step={0.05}
-          value={current}
-          onChange={(e) => {
+        <div className="hair" style={{ background: 'transparent' }} />
+
+        <span className="live__label">Velocidad</span>
+        <div className="seg">
+          {SPEEDS.map((value) => (
+            <button
+              key={value}
+              className={speed === value ? 'on' : ''}
+              onClick={() => changeSpeed(value)}
+            >
+              {value}×
+            </button>
+          ))}
+        </div>
+
+        <button
+          className="ctl"
+          title={muted ? 'Activar sonido' : 'Silenciar'}
+          onClick={() => {
             const video = videoRef.current;
             if (!video) return;
-            const value = Number(e.target.value);
-            video.currentTime = value;
-            setCurrent(value);
-            onTimeUpdate(value);
+            video.muted = !video.muted;
+            setMuted(video.muted);
           }}
-        />
-
-        <button
-          className="ctl"
-          onClick={() => setMuted((m) => !m)}
-          title="Silenciar (M)"
         >
-          {muted || volume === 0 ? <IconMute size={15} /> : <IconVolume size={15} />}
+          {muted ? <IconMute size={15} /> : <IconVolume size={15} />}
         </button>
-        <input
-          className="vol"
-          type="range"
-          min={0}
-          max={1}
-          step={0.01}
-          value={muted ? 0 : volume}
-          onChange={(e) => {
-            const value = Number(e.target.value);
-            setVolume(value);
-            setMuted(value === 0);
-            if (videoRef.current) videoRef.current.volume = value;
-          }}
-        />
-
-        <select
-          className="select"
-          value={speed}
-          onChange={(e) => {
-            const value = Number(e.target.value);
-            setSpeed(value);
-            if (videoRef.current) videoRef.current.playbackRate = value;
-          }}
-          title="Velocidad de reproduccion"
-        >
-          {SPEEDS.map((s) => (
-            <option key={s} value={s}>
-              {s}x
-            </option>
-          ))}
-        </select>
-
         <button
           className="ctl"
+          title="Pantalla completa"
           onClick={() => void videoRef.current?.requestFullscreen().catch(() => undefined)}
-          title="Pantalla completa (F)"
         >
           <IconFullscreen size={15} />
         </button>
       </div>
-    </div>
+    </>
   );
 });

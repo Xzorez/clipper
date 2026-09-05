@@ -1,177 +1,237 @@
-import { useCallback, useEffect, useState } from 'react';
-import { formatTime } from '../lib/events';
+import { useMemo } from 'react';
+import { GameEvent } from '@shared/types';
+import { EVENT_VISUALS, formatTime } from '../lib/events';
 
 export type ClipAspect = 'original' | 'vertical';
-
-/** Lo minimo que puede durar un clip para que valga de algo. */
-const MIN_LENGTH = 1;
 
 export interface ClipDraft {
   start: number;
   end: number;
 }
 
+/** Lo minimo que puede durar un clip para que valga de algo. */
+const MIN_LENGTH = 1;
+/** Hueco maximo entre dos momentos para considerarlos la misma racha. */
+const STREAK_GAP = 20;
+
 /**
- * Ajuste del principio y el final de un clip antes de exportarlo.
+ * Rango que cubre la racha a la que pertenece un instante.
  *
- * Antes un clip eran diez segundos antes y cinco despues, siempre. Sirve para
- * una kill suelta y no sirve para nada mas: una jugada larga se queda cortada
- * y un momento breve arrastra medio minuto de nada.
+ * Una jugada buena rara vez es un solo evento: son tres kills seguidas. Se
+ * agrupan los momentos separados por menos de veinte segundos y se devuelve
+ * de la primera a la ultima, con un poco de aire a los lados.
+ */
+export function streakAround(events: GameEvent[], at: number): ClipDraft | null {
+  const sorted = [...events].sort((a, b) => a.videoTime - b.videoTime);
+  if (sorted.length === 0) return null;
+
+  let start = -1;
+  let end = -1;
+  for (let i = 0; i < sorted.length; i++) {
+    if (start < 0) start = i;
+    const next = sorted[i + 1];
+    if (!next || next.videoTime - sorted[i].videoTime > STREAK_GAP) {
+      end = i;
+      if (sorted[start].videoTime - STREAK_GAP <= at && at <= sorted[end].videoTime + STREAK_GAP) {
+        return { start: Math.max(0, sorted[start].videoTime - 6), end: sorted[end].videoTime + 5 };
+      }
+      start = -1;
+    }
+  }
+  return null;
+}
+
+/**
+ * Editor de recorte, en el lateral del reproductor.
  *
- * El ajuste se hace llevando el video al punto exacto y fijando ahi el
- * principio o el final, en lugar de arrastrando un tirador diminuto. Es mas
- * preciso, porque se ve el fotograma mientras se decide, y funciona igual de
- * bien en una grabacion de veinte minutos que en una de dos.
+ * Dos flujos a la vez, a proposito. Arriba el ajuste fino: se lleva el video
+ * al punto exacto y se fija ahi el principio o el final, que es mas preciso
+ * que arrastrar un tirador porque se ve el fotograma mientras se decide.
+ * Abajo, los de un clic, para cuando no hay nada que ajustar y lo unico que
+ * se quiere es guardar lo que acaba de pasar.
  */
 export function ClipEditor({
   duration,
   draft,
   currentTime,
+  events,
   busy,
+  aspect,
+  onAspect,
   onChange,
   onSeek,
-  onCancel,
   onExport,
 }: {
   duration: number;
   draft: ClipDraft;
   currentTime: number;
+  events: GameEvent[];
   busy: boolean;
+  aspect: ClipAspect;
+  onAspect: (aspect: ClipAspect) => void;
   onChange: (draft: ClipDraft) => void;
   onSeek: (seconds: number) => void;
-  onCancel: () => void;
-  onExport: (aspect: ClipAspect) => void;
+  onExport: () => void;
 }) {
-  const [aspect, setAspect] = useState<ClipAspect>('original');
-
   const length = Math.max(0, draft.end - draft.start);
   const valid = length >= MIN_LENGTH;
-
-  const setStartHere = useCallback(() => {
-    // El principio nunca puede pasarse del final: se empuja el final si hace
-    // falta, en lugar de rechazar la accion y dejar a nadie sin saber por que.
-    const start = Math.min(currentTime, duration - MIN_LENGTH);
-    onChange({ start: Math.max(0, start), end: Math.max(draft.end, start + MIN_LENGTH) });
-  }, [currentTime, duration, draft.end, onChange]);
-
-  const setEndHere = useCallback(() => {
-    const end = Math.max(currentTime, MIN_LENGTH);
-    onChange({ start: Math.min(draft.start, end - MIN_LENGTH), end: Math.min(duration, end) });
-  }, [currentTime, duration, draft.start, onChange]);
-
-  const nudge = useCallback(
-    (edge: 'start' | 'end', delta: number) => {
-      if (edge === 'start') {
-        const start = Math.max(0, Math.min(draft.start + delta, draft.end - MIN_LENGTH));
-        onChange({ ...draft, start });
-      } else {
-        const end = Math.min(duration, Math.max(draft.end + delta, draft.start + MIN_LENGTH));
-        onChange({ ...draft, end });
-      }
-    },
-    [draft, duration, onChange],
-  );
-
-  // Escape cancela: es lo que espera cualquiera con un panel abierto delante.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCancel();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onCancel]);
-
   const pct = (seconds: number) => (duration > 0 ? (seconds / duration) * 100 : 0);
 
+  /** El momento mas cercano al centro del recorte, para titular el clip. */
+  const nearest = useMemo(() => {
+    const center = (draft.start + draft.end) / 2;
+    let best: GameEvent | null = null;
+    for (const event of events) {
+      if (!best || Math.abs(event.videoTime - center) < Math.abs(best.videoTime - center)) {
+        best = event;
+      }
+    }
+    return best && Math.abs(best.videoTime - center) < 30 ? best : null;
+  }, [events, draft]);
+
+  const setEdge = (edge: 'start' | 'end', value: number) => {
+    if (edge === 'start') {
+      const start = Math.max(0, Math.min(value, draft.end - MIN_LENGTH));
+      onChange({ ...draft, start });
+    } else {
+      const end = Math.min(duration, Math.max(value, draft.start + MIN_LENGTH));
+      onChange({ ...draft, end });
+    }
+  };
+
+  const quick: Array<{ label: string; key: string; color: string; range: ClipDraft | null }> = [
+    {
+      label: 'Ultimos 30 s',
+      key: 'F8',
+      color: 'var(--accent)',
+      range: { start: Math.max(0, currentTime - 30), end: currentTime },
+    },
+    {
+      label: 'Este momento ± 12 s',
+      key: '↵',
+      color: nearest ? EVENT_VISUALS[nearest.type].color : 'var(--round)',
+      range: nearest
+        ? {
+            start: Math.max(0, nearest.videoTime - 12),
+            end: Math.min(duration, nearest.videoTime + 12),
+          }
+        : null,
+    },
+    {
+      label: 'Toda la racha',
+      key: '⇧F8',
+      color: 'var(--kill)',
+      range: streakAround(events, (draft.start + draft.end) / 2),
+    },
+  ];
+
   return (
-    <div className="cliped">
-      <div className="cliped__head">
-        <span className="cliped__title">Recortar clip</span>
-        <span className="cliped__len">
-          {formatTime(draft.start)} - {formatTime(draft.end)}
-          <b>{length.toFixed(1)}s</b>
-        </span>
+    <aside className="aside">
+      <div className="aside__head">
+        <span className="eyebrow">Editor de clip</span>
+        <span className="aside__len">{formatTime(length)}</span>
       </div>
 
-      {/* Franja de la grabacion entera con el trozo elegido resaltado. */}
-      <div className="cliped__bar" onClick={(e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        onSeek(((e.clientX - rect.left) / rect.width) * duration);
-      }}>
-        <div
-          className="cliped__sel"
-          style={{ left: `${pct(draft.start)}%`, width: `${pct(length)}%` }}
-        />
-        <div className="cliped__cursor" style={{ left: `${pct(currentTime)}%` }} />
-      </div>
+      <div className="aside__body">
+        <div className="trim">
+          <span className="trim__title">
+            {nearest
+              ? `${EVENT_VISUALS[nearest.type].label} · ${formatTime(nearest.videoTime)}`
+              : `Desde ${formatTime(draft.start)}`}
+          </span>
 
-      <div className="cliped__edges">
-        <div className="cliped__edge">
-          <span className="cliped__label">Inicio</span>
-          <button className="btn btn--sm btn--quiet" onClick={() => nudge('start', -1)}>
-            -1s
-          </button>
-          <button className="btn btn--sm btn--quiet" onClick={() => onSeek(draft.start)}>
-            {formatTime(draft.start)}
-          </button>
-          <button className="btn btn--sm btn--quiet" onClick={() => nudge('start', 1)}>
-            +1s
-          </button>
-          <button className="btn btn--sm" onClick={setStartHere}>
-            Aqui
-          </button>
-        </div>
+          <div className="trim__fields">
+            <label className="field">
+              <span className="field__l">Inicio</span>
+              <input
+                type="text"
+                value={formatTime(draft.start)}
+                readOnly
+                onClick={() => onSeek(draft.start)}
+                title="Pulsa para ir al principio del recorte"
+              />
+            </label>
+            <label className="field">
+              <span className="field__l">Fin</span>
+              <input
+                type="text"
+                value={formatTime(draft.end)}
+                readOnly
+                onClick={() => onSeek(draft.end)}
+                title="Pulsa para ir al final del recorte"
+              />
+            </label>
+          </div>
 
-        <div className="cliped__edge">
-          <span className="cliped__label">Fin</span>
-          <button className="btn btn--sm btn--quiet" onClick={() => nudge('end', -1)}>
-            -1s
-          </button>
-          <button className="btn btn--sm btn--quiet" onClick={() => onSeek(draft.end)}>
-            {formatTime(draft.end)}
-          </button>
-          <button className="btn btn--sm btn--quiet" onClick={() => nudge('end', 1)}>
-            +1s
-          </button>
-          <button className="btn btn--sm" onClick={setEndHere}>
-            Aqui
-          </button>
-        </div>
-      </div>
-
-      <div className="cliped__foot">
-        <div className="cliped__aspect">
-          <button
-            className={`chip${aspect === 'original' ? ' chip--on' : ''}`}
-            onClick={() => setAspect('original')}
+          <div
+            className="trim__strip"
+            title="Pulsa para mover el video dentro de la grabacion"
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              onSeek(((e.clientX - rect.left) / rect.width) * duration);
+            }}
           >
-            Original
+            <div
+              className="trim__sel"
+              style={{ left: `${pct(draft.start)}%`, width: `${pct(length)}%` }}
+            />
+            <div className="trim__cursor" style={{ left: `${pct(currentTime)}%` }} />
+          </div>
+
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="btn btn--ghost btn--sm" onClick={() => setEdge('start', currentTime)}>
+              Inicio aqui
+            </button>
+            <button className="btn btn--ghost btn--sm" onClick={() => setEdge('end', currentTime)}>
+              Fin aqui
+            </button>
+          </div>
+
+          <div className="seg">
+            <button className={aspect === 'original' ? 'on' : ''} onClick={() => onAspect('original')}>
+              Original
+            </button>
+            <button
+              className={aspect === 'vertical' ? 'on' : ''}
+              onClick={() => onAspect('vertical')}
+              title="Recorta a 9:16 para mandarlo por el movil"
+            >
+              Vertical
+            </button>
+          </div>
+
+          <button className="btn btn--wide" disabled={busy || !valid} onClick={onExport}>
+            {busy ? 'Guardando...' : 'Guardar clip'}
           </button>
-          <button
-            className={`chip${aspect === 'vertical' ? ' chip--on' : ''}`}
-            onClick={() => setAspect('vertical')}
-            title="Recorta a 9:16 para mandarlo por el movil"
-          >
-            Vertical
-          </button>
+
+          {!valid && (
+            <span className="field__l" style={{ color: 'var(--warn)' }}>
+              El clip tiene que durar al menos un segundo.
+            </span>
+          )}
         </div>
 
-        <div className="cliped__actions">
-          <button className="btn btn--sm btn--quiet" onClick={onCancel} disabled={busy}>
-            Cancelar
-          </button>
-          <button className="btn btn--sm" onClick={() => onExport(aspect)} disabled={busy || !valid}>
-            {busy ? 'Exportando...' : 'Exportar'}
-          </button>
+        <div className="quick">
+          <span className="eyebrow" style={{ letterSpacing: '0.16em' }}>
+            Un clic
+          </span>
+          <div className="quick__list">
+            {quick.map((item) => (
+              <button
+                key={item.label}
+                className="quick__row"
+                disabled={!item.range}
+                title={item.range ? undefined : 'No hay ningun momento cerca'}
+                onClick={() => item.range && onChange(item.range)}
+              >
+                <span className="quick__dot" style={{ background: item.color }} />
+                <span className="quick__l">{item.label}</span>
+                <span className="quick__k">{item.key}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
-
-      {!valid && <div className="cliped__warn">El clip tiene que durar al menos un segundo.</div>}
-      {aspect === 'vertical' && (
-        <div className="cliped__warn cliped__warn--soft">
-          El vertical recorta los lados y hay que recodificar, asi que tarda algo mas.
-        </div>
-      )}
-    </div>
+    </aside>
   );
 }

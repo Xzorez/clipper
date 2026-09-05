@@ -1,263 +1,175 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { GameEvent, GameEventType } from '@shared/types';
-import { clusterEvents, computeTicks, TimelineCluster } from '@shared/timeline';
-import { EVENT_VISUALS, formatTime, formatTimePrecise } from '../lib/events';
-
-/** Separacion minima en pixeles entre dos marcadores antes de agruparlos. */
-const MIN_MARKER_SPACING_PX = 20;
-
-/** Margen extra, en pixeles, que se renderiza fuera de la zona visible. */
-const OVERSCAN_PX = 300;
-
-export interface TimelineProps {
-  events: GameEvent[];
-  duration: number;
-  currentTime: number;
-  visibleTypes: Set<GameEventType>;
-  iconSize: 'small' | 'medium' | 'large';
-  showLabels: boolean;
-  onSeek: (seconds: number) => void;
-}
-
-type Cluster = TimelineCluster;
+import { clusterEvents, computeTicks } from '@shared/timeline';
+import { EVENT_VISUALS, formatTime } from '../lib/events';
 
 /**
- * Linea temporal con marcadores de evento.
+ * Pistas de la linea temporal, en orden de importancia.
  *
- * Decisiones de rendimiento, que es donde esto se puede ir de las manos:
- *
- *  1. **Agrupacion.** No se pinta un nodo por evento: los eventos que caerian a
- *     menos de 20 px se agrupan en un unico marcador con el numero de eventos.
- *     Una partida de VALORANT con 24 kills, 13 muertes y 8 headshots son 45
- *     eventos; en una timeline de 900 px muchos se solapan y sin agrupar
- *     resultarian ilegibles ademas de costosos.
- *
- *  2. **Ventana visible.** Con zoom la pista se hace mas ancha que el
- *     contenedor. Solo se renderizan los grupos dentro del area visible mas un
- *     margen, asi que el numero de nodos del DOM no crece con el zoom.
- *
- *  3. **Recalculo controlado.** Los grupos se recalculan solo cuando cambian
- *     los eventos, los filtros, el zoom o el ancho del contenedor. El
- *     movimiento del cabezal de reproduccion, que ocurre varias veces por
- *     segundo, no dispara ningun recalculo: solo mueve un elemento.
- *
- *  4. **Redimensionado.** Un ResizeObserver mantiene el ancho actualizado, de
- *     forma que la timeline se recoloca al cambiar el tamano de la ventana.
+ * Una fila por clase de momento en vez de todos amontonados en una sola: con
+ * una sola pista, una kill y un fin de ronda pesaban igual y no habia forma de
+ * leer la partida de un vistazo. Solo se dibujan las pistas que tienen algo.
  */
+const LANES: Array<{ label: string; types: GameEventType[] }> = [
+  { label: 'Kills', types: [GameEventType.KILL] },
+  { label: 'Headshots', types: [GameEventType.HEADSHOT] },
+  { label: 'Muertes', types: [GameEventType.DEATH, GameEventType.KNOCKED_OUT] },
+  { label: 'Asistencias', types: [GameEventType.ASSIST] },
+  { label: 'Tus marcas', types: [GameEventType.BOOKMARK] },
+  { label: 'Por sonido', types: [GameEventType.HIGHLIGHT] },
+];
+
+/** Tipos que se pueden filtrar, en el orden de los chips. */
+const FILTERS: GameEventType[] = [
+  GameEventType.KILL,
+  GameEventType.DEATH,
+  GameEventType.HEADSHOT,
+  GameEventType.ASSIST,
+  GameEventType.KNOCKED_OUT,
+  GameEventType.BOOKMARK,
+  GameEventType.HIGHLIGHT,
+];
+
+/** Separacion minima entre marcas. Por debajo se agrupan en una sola. */
+const MIN_SPACING_PX = 7;
+
 export function Timeline({
   events,
   duration,
   currentTime,
   visibleTypes,
-  iconSize,
-  showLabels,
+  onToggleType,
   onSeek,
-}: TimelineProps) {
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState(900);
-  const [zoom, setZoom] = useState(1);
-  const [scrollLeft, setScrollLeft] = useState(0);
-  const [hover, setHover] = useState<{ cluster: Cluster; x: number; y: number } | null>(null);
+}: {
+  events: GameEvent[];
+  duration: number;
+  currentTime: number;
+  visibleTypes: Set<GameEventType>;
+  onToggleType: (type: GameEventType) => void;
+  onSeek: (seconds: number) => void;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
 
-  // Ancho real del contenedor, actualizado ante cualquier redimensionado.
+  /**
+   * Ancho real de una pista.
+   *
+   * El agrupado de marcas se hace en pixeles, no en porcentaje: lo que decide
+   * si dos momentos se pisan es cuanto espacio hay en pantalla, y eso cambia
+   * al redimensionar la ventana.
+   */
   useEffect(() => {
-    const element = wrapRef.current;
+    const element = trackRef.current;
     if (!element) return;
-    const observer = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect.width;
-      if (width && width > 0) setContainerWidth(width);
-    });
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
     observer.observe(element);
-    setContainerWidth(element.clientWidth || 900);
+    setWidth(element.getBoundingClientRect().width);
     return () => observer.disconnect();
   }, []);
 
-  const trackWidth = Math.max(containerWidth, containerWidth * zoom);
-  const safeDuration = duration > 0 ? duration : 1;
+  const counts = useMemo(() => {
+    const map = new Map<GameEventType, number>();
+    for (const event of events) map.set(event.type, (map.get(event.type) ?? 0) + 1);
+    return map;
+  }, [events]);
 
-  const visibleEvents = useMemo(
-    () => events.filter((event) => visibleTypes.has(event.type)),
-    [events, visibleTypes],
+  const lanes = useMemo(() => {
+    const sorted = [...events].sort((a, b) => a.videoTime - b.videoTime);
+    return LANES.map((lane) => {
+      const shown = lane.types.filter((type) => visibleTypes.has(type));
+      const own = sorted.filter((event) => shown.includes(event.type));
+      return {
+        label: lane.label,
+        clusters: width > 0 ? clusterEvents(own, width, duration, MIN_SPACING_PX) : [],
+        total: lane.types.reduce((sum, type) => sum + (counts.get(type) ?? 0), 0),
+      };
+    }).filter((lane) => lane.total > 0);
+  }, [events, visibleTypes, duration, counts, width]);
+
+  const ticks = useMemo(
+    () => (width > 0 ? computeTicks(duration, width) : []),
+    [duration, width],
   );
 
-  /** Agrupacion por proximidad en pixeles (logica pura en @shared/timeline). */
-  const clusters = useMemo<Cluster[]>(
-    () => clusterEvents(visibleEvents, trackWidth, safeDuration, MIN_MARKER_SPACING_PX),
-    [visibleEvents, trackWidth, safeDuration],
-  );
+  const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
 
-  /** Solo los grupos dentro de la ventana visible, con margen. */
-  const renderedClusters = useMemo(() => {
-    if (zoom === 1) return clusters;
-    const from = scrollLeft - OVERSCAN_PX;
-    const to = scrollLeft + containerWidth + OVERSCAN_PX;
-    return clusters.filter((cluster) => cluster.x >= from && cluster.x <= to);
-  }, [clusters, zoom, scrollLeft, containerWidth]);
-
-  /** Marcas de tiempo con un intervalo legible segun el zoom. */
-  const ticks = useMemo(() => computeTicks(safeDuration, trackWidth), [safeDuration, trackWidth]);
-
-  const handleTrackClick = useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => {
-      const rect = event.currentTarget.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const ratio = Math.min(1, Math.max(0, x / trackWidth));
-      onSeek(ratio * safeDuration);
-    },
-    [trackWidth, safeDuration, onSeek],
-  );
-
-  const playheadX = (Math.min(currentTime, safeDuration) / safeDuration) * trackWidth;
+  const seekFromClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    onSeek(((e.clientX - rect.left) / rect.width) * duration);
+  };
 
   return (
-    <div>
-      <div
-        className="tl__wrap"
-        ref={wrapRef}
-        onScroll={(e) => setScrollLeft(e.currentTarget.scrollLeft)}
-      >
-        <div
-          className="tl__track"
-          style={{ width: trackWidth }}
-          onClick={handleTrackClick}
-        >
-          <div className="tl__rail">
+    <div className="lanes">
+      <div className="lanes__head">
+        <span className="eyebrow">Linea temporal</span>
+        <div className="hair" />
+        <div className="lanes__filters">
+          {FILTERS.filter((type) => (counts.get(type) ?? 0) > 0).map((type) => {
+            const visual = EVENT_VISUALS[type];
+            const on = visibleTypes.has(type);
+            return (
+              <button
+                key={type}
+                className={`chip${on ? '' : ' chip--off'}`}
+                title={on ? 'Ocultar esta pista' : 'Mostrar esta pista'}
+                onClick={() => onToggleType(type)}
+              >
+                <i style={{ background: visual.color }} />
+                {visual.label}
+                <span className="chip__n">{counts.get(type)}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="lanes__rows">
+        {lanes.map((lane, index) => (
+          <div className="lane" key={lane.label}>
+            <span className="lane__l">{lane.label}</span>
             <div
-              className="tl__fill"
-              style={{ width: `${(Math.min(currentTime, safeDuration) / safeDuration) * 100}%` }}
-            />
+              className="lane__track"
+              // Se mide una sola pista: todas comparten ancho.
+              ref={index === 0 ? trackRef : undefined}
+              onClick={seekFromClick}
+            >
+              {lane.clusters.map((cluster) => (
+                <button
+                  key={cluster.events[0].id}
+                  className="lane__mark"
+                  title={
+                    cluster.events.length > 1
+                      ? `${cluster.events.length} momentos · ${formatTime(cluster.time)}`
+                      : `${EVENT_VISUALS[cluster.dominant].label} · ${formatTime(cluster.time)}`
+                  }
+                  style={{
+                    left: `${cluster.x}px`,
+                    background: EVENT_VISUALS[cluster.dominant].color,
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSeek(cluster.time);
+                  }}
+                />
+              ))}
+            </div>
           </div>
+        ))}
 
-          <div className="tl__head-line" style={{ left: playheadX }} />
-
-          {renderedClusters.map((cluster) => (
-            <Marker
-              key={`${cluster.events[0].id}-${cluster.events.length}`}
-              cluster={cluster}
-              size={iconSize}
-              showLabel={showLabels}
-              onSeek={onSeek}
-              onHover={setHover}
-            />
-          ))}
-        </div>
-
-        <div className="ruler" style={{ width: trackWidth, position: 'relative' }}>
-          {ticks.map((tick) => (
-            <span key={tick.time} className="tick" style={{ left: tick.x }}>
-              {formatTime(tick.time)}
-            </span>
-          ))}
+        <div className="ruler">
+          <span className="ruler__pad" />
+          <div className="ruler__bar" onClick={seekFromClick}>
+            <div className="ruler__base" />
+            <div className="ruler__done" style={{ width: `${progress}%` }} />
+            <div className="ruler__head" style={{ left: `${progress}%` }} />
+            {ticks.map((tick) => (
+              <span key={tick.time} className="ruler__tick" style={{ left: `${tick.x}px` }}>
+                {formatTime(tick.time)}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
-
-      <div
-        className="zoom"
-        style={{ marginTop: 10, justifyContent: 'flex-end' }}
-      >
-        <span>
-          {visibleEvents.length} evento{visibleEvents.length === 1 ? '' : 's'}
-          {clusters.length !== visibleEvents.length && ` en ${clusters.length} grupos`}
-        </span>
-        <button
-          className="btn btn--sm btn--quiet"
-          onClick={() => setZoom((z) => Math.max(1, z - 1))}
-          disabled={zoom <= 1}
-          title="Alejar"
-        >
-          −
-        </button>
-        <span style={{ minWidth: 34, textAlign: 'center' }}>{zoom}x</span>
-        <button
-          className="btn btn--sm btn--quiet"
-          onClick={() => setZoom((z) => Math.min(20, z + 1))}
-          disabled={zoom >= 20}
-          title="Acercar"
-        >
-          +
-        </button>
-      </div>
-
-      {hover && <Tooltip cluster={hover.cluster} x={hover.x} y={hover.y} />}
     </div>
   );
-}
-
-interface MarkerProps {
-  cluster: Cluster;
-  size: 'small' | 'medium' | 'large';
-  showLabel: boolean;
-  onSeek: (seconds: number) => void;
-  onHover: (value: { cluster: Cluster; x: number; y: number } | null) => void;
-}
-
-function Marker({ cluster, size, showLabel, onSeek, onHover }: MarkerProps) {
-  const isCluster = cluster.events.length > 1;
-  const visual = EVENT_VISUALS[cluster.dominant];
-
-  return (
-    <button
-      className={`mk mk--${size}${isCluster ? ' mk--group' : ''}`}
-      style={{
-        left: cluster.x,
-        background: isCluster ? undefined : visual.color,
-        borderColor: isCluster ? visual.color : undefined,
-      }}
-      onClick={(event) => {
-        event.stopPropagation();
-        onSeek(cluster.time);
-      }}
-      onMouseEnter={(event) => {
-        const rect = event.currentTarget.getBoundingClientRect();
-        onHover({ cluster, x: rect.left + rect.width / 2, y: rect.top });
-      }}
-      onMouseLeave={() => onHover(null)}
-      aria-label={`${visual.label} en ${formatTime(cluster.time)}`}
-    >
-      {isCluster ? cluster.events.length : null}
-    </button>
-  );
-}
-
-function Tooltip({ cluster, x, y }: { cluster: Cluster; x: number; y: number }) {
-  const lines = cluster.events.slice(0, 6);
-  return (
-    <div
-      className="tip"
-      style={{ left: x, top: y - 12, transform: 'translate(-50%, -100%)' }}
-    >
-      {lines.map((event) => {
-        const visual = EVENT_VISUALS[event.type];
-        return (
-          <div key={event.id}>
-            <span style={{ color: visual.color, fontWeight: 600 }}>{visual.label}</span>
-            {' — '}
-            {formatTimePrecise(event.videoTime)}
-            {renderMeta(event)}
-          </div>
-        );
-      })}
-      {cluster.events.length > lines.length && (
-        <div className="tip__meta">
-          y {cluster.events.length - lines.length} mas
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Muestra los datos utiles de la metadata sin volcar JSON crudo. */
-function renderMeta(event: GameEvent) {
-  const meta = event.metadata;
-  if (!meta) return null;
-  const parts: string[] = [];
-  if (typeof meta.weapon === 'string') parts.push(String(meta.weapon));
-  if (typeof meta.victim === 'string') parts.push(`a ${meta.victim}`);
-  if (typeof meta.killer === 'string') parts.push(`por ${meta.killer}`);
-  if (typeof meta.round === 'number' || typeof meta.round === 'string') {
-    parts.push(`ronda ${meta.round}`);
-  }
-  if (typeof meta.label === 'string' && meta.label !== 'kill') parts.push(String(meta.label));
-  if (parts.length === 0) return null;
-  return <span className="tip__meta"> · {parts.join(' · ')}</span>;
 }

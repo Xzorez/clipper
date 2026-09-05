@@ -62,6 +62,14 @@ export interface ClipperApi {
   createClip(request: CreateClipRequest): Promise<ClipRecord>;
   deleteClip(id: string, deleteFile: boolean): Promise<{ deleted: boolean }>;
 
+  /** Marca el instante actual de la grabacion en curso. Devuelve false si no hay. */
+  addBookmark(): Promise<boolean>;
+
+  /** Controles de la ventana, que ahora dibuja la propia barra superior. */
+  minimizeWindow(): void;
+  toggleMaximizeWindow(): void;
+  closeWindow(): void;
+
   getUpdateStatus(): Promise<UpdateStatus>;
   /** Comprueba a mano si hay version nueva y devuelve el resultado. */
   checkForUpdate(): Promise<UpdateStatus>;

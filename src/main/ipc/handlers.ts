@@ -45,6 +45,10 @@ export function registerIpcHandlers(context: AppContext, getWindow: WindowGetter
 
   handle(IPC.GET_LOGS, () => loggerRoot.getBuffer());
 
+  // Mismo camino que el atajo F9: el boton de la interfaz y la tecla no
+  // pueden acabar poniendo marcadores distintos.
+  handle(IPC.ADD_BOOKMARK, () => context.addBookmark());
+
   handle(IPC.GET_UPDATE_STATUS, () => context.updates.getStatus());
   handle(IPC.CHECK_UPDATE, () => context.updates.checkNow());
   handle(IPC.INSTALL_UPDATE, () => context.updates.installNow());

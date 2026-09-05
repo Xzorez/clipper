@@ -265,18 +265,9 @@ export class AppContext {
           }
           break;
 
-        case 'bookmark': {
-          const marker = this.eventManager.addBookmark('Marcador manual');
-          if (marker) {
-            log.info(`Marcador anadido en ${marker.videoTime.toFixed(2)}s`);
-          } else {
-            this.notifyWarning(
-              'No hay ninguna grabacion activa',
-              'El marcador solo se puede anadir mientras se esta grabando.',
-            );
-          }
+        case 'bookmark':
+          this.addBookmark();
           break;
-        }
 
         case 'saveClip': {
           const active = this.recordingManager.current;
@@ -382,6 +373,26 @@ export class AppContext {
     const status = this.buildStatus();
     this.send(IPC.ON_STATUS, status);
     this.onStatus?.(status);
+  }
+
+  /**
+   * Marca el instante actual de la partida.
+   *
+   * Lo usan el atajo global y el boton de la interfaz. Vive aqui, y no
+   * duplicado en cada sitio, para que los dos pongan exactamente el mismo
+   * marcador y avisen igual cuando no hay nada que marcar.
+   */
+  addBookmark(): boolean {
+    const marker = this.eventManager.addBookmark('Marcador manual');
+    if (marker) {
+      log.info(`Marcador anadido en ${marker.videoTime.toFixed(2)}s`);
+      return true;
+    }
+    this.notifyWarning(
+      'No hay ninguna grabacion activa',
+      'El marcador solo se puede anadir mientras se esta grabando.',
+    );
+    return false;
   }
 
   /** Empieza o detiene la grabacion, segun lo que haya ahora mismo. */

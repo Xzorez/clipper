@@ -23,6 +23,10 @@ export const IPC = {
   GET_UPDATE_STATUS: 'clipper:get-update-status',
   CHECK_UPDATE: 'clipper:check-update',
   INSTALL_UPDATE: 'clipper:install-update',
+  ADD_BOOKMARK: 'clipper:add-bookmark',
+  WINDOW_MINIMIZE: 'clipper:window-minimize',
+  WINDOW_MAXIMIZE: 'clipper:window-maximize',
+  WINDOW_CLOSE: 'clipper:window-close',
   AUDIO_CHUNK: 'clipper:audio-chunk',
   AUDIO_READY: 'clipper:audio-ready',
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import {
   AppSettings,
   GAME_DISPLAY_NAMES,
@@ -10,6 +10,15 @@ import {
 import { api } from '../lib/api';
 import { useUpdateStatus } from '../lib/useUpdateStatus';
 
+type Tab = 'recording' | 'events' | 'hotkeys' | 'diagnostics';
+
+const TABS: Array<{ key: Tab; label: string }> = [
+  { key: 'recording', label: 'Grabacion' },
+  { key: 'events', label: 'Momentos' },
+  { key: 'hotkeys', label: 'Atajos' },
+  { key: 'diagnostics', label: 'Diagnostico' },
+];
+
 export interface SettingsPageProps {
   settings: AppSettings | null;
   status: LiveStatus | null;
@@ -17,52 +26,86 @@ export interface SettingsPageProps {
   onNotify: (title: string, message: string) => void;
 }
 
-type Tab = 'recording' | 'events' | 'interface' | 'hotkeys' | 'diagnostics';
+/* --- Piezas comunes -------------------------------------------------------
+   Una fila es siempre lo mismo: que es, por que importa, y el control a la
+   derecha. Mantenerlo identico en las cuatro pestanas es lo que evita que
+   Ajustes se lea como una parrilla.
+-------------------------------------------------------------------------- */
 
-const TABS: Array<{ key: Tab; label: string }> = [
-  { key: 'recording', label: 'Grabacion' },
-  { key: 'events', label: 'Eventos' },
-  { key: 'interface', label: 'Interfaz' },
-  { key: 'hotkeys', label: 'Atajos' },
-  { key: 'diagnostics', label: 'Diagnostico' },
-];
+function Row({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="row">
+      <div className="row__text">
+        <span className="row__l">{label}</span>
+        {hint && <span className="row__hint">{hint}</span>}
+      </div>
+      <div className="row__ctl">{children}</div>
+    </div>
+  );
+}
+
+function Switch({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      className={`switch${value ? ' switch--on' : ''}`}
+      role="switch"
+      aria-checked={value}
+      onClick={() => onChange(!value)}
+    />
+  );
+}
 
 export function SettingsPage({ settings, status, onChange, onNotify }: SettingsPageProps) {
   const [tab, setTab] = useState<Tab>('recording');
 
-  if (!settings) return <div className="empty">Cargando configuracion...</div>;
+  if (!settings) {
+    return (
+      <div className="empty">
+        <div className="empty__title">Cargando ajustes</div>
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <h1 className="page__title">Configuracion</h1>
-      <p className="page__sub">Los cambios se guardan al instante.</p>
+    <>
+      <div className="section-h">
+        <h1 className="title">Ajustes</h1>
+        <div className="hair" />
+      </div>
 
       <div className="tabs">
-        {TABS.map((item) => (
+        {TABS.map(({ key, label }) => (
           <button
-            key={item.key}
-            className={`tab${tab === item.key ? ' tab--on' : ''}`}
-            onClick={() => setTab(item.key)}
+            key={key}
+            className={`chip${tab === key ? ' chip--on' : ''}`}
+            onClick={() => setTab(key)}
           >
-            {item.label}
+            {label}
           </button>
         ))}
       </div>
 
       {tab === 'recording' && (
-        <RecordingSettings settings={settings} status={status} onChange={onChange} onNotify={onNotify} />
+        <RecordingTab settings={settings} status={status} onChange={onChange} onNotify={onNotify} />
       )}
-      {tab === 'events' && <EventSettings settings={settings} onChange={onChange} />}
-      {tab === 'interface' && <InterfaceSettings settings={settings} onChange={onChange} />}
-      {tab === 'hotkeys' && <HotkeySettings settings={settings} onChange={onChange} />}
-      {tab === 'diagnostics' && <Diagnostics status={status} />}
-    </div>
+      {tab === 'events' && <EventsTab settings={settings} onChange={onChange} />}
+      {tab === 'hotkeys' && <HotkeysTab settings={settings} />}
+      {tab === 'diagnostics' && <DiagnosticsTab status={status} />}
+    </>
   );
 }
 
-// ---------------------------------------------------------------------------
+/* --- Grabacion ----------------------------------------------------------- */
 
-function RecordingSettings({
+function RecordingTab({
   settings,
   status,
   onChange,
@@ -79,8 +122,7 @@ function RecordingSettings({
 
   return (
     <>
-    <div className="section">En segundo plano</div>
-    <div className="card">
+      <span className="eyebrow">En segundo plano</span>
       <div className="rows">
         <Row
           label="Arrancar con Windows"
@@ -91,7 +133,6 @@ function RecordingSettings({
             onChange={(v) => onChange({ general: { startWithWindows: v } })}
           />
         </Row>
-
         <Row
           label="Cerrar la ventana la esconde"
           hint="Sigue vigilando partidas con la ventana cerrada. Para salir de verdad, boton derecho en el icono de la bandeja."
@@ -102,81 +143,77 @@ function RecordingSettings({
           />
         </Row>
       </div>
-    </div>
 
-    <div className="section">Captura</div>
-    <div className="card">
+      <span className="eyebrow">Captura</span>
       <div className="rows">
-        <Row label="Grabacion automatica" hint="Empieza a grabar en cuanto se detecta un juego soportado.">
-          <Switch value={r.autoRecord} onChange={(v) => onChange({ recording: { autoRecord: v } })} />
+        <Row
+          label="Grabacion automatica"
+          hint="Empieza a grabar en cuanto detecta un juego."
+        >
+          <Switch
+            value={r.autoRecord}
+            onChange={(v) => onChange({ recording: { autoRecord: v } })}
+          />
         </Row>
 
-        <Row label="Resolucion" hint="Nunca se escala hacia arriba: si tu monitor es 1080p, 1440p no anade calidad.">
+        <Row
+          label="Resolucion"
+          hint="Nunca se escala hacia arriba: si tu monitor es 1080p, 1440p no anade calidad."
+        >
           <select
-            className="select"
+            className="cap"
             value={r.resolution}
             onChange={(e) => onChange({ recording: { resolution: Number(e.target.value) } })}
           >
             <option value={720}>720p</option>
             <option value={1080}>1080p</option>
             <option value={1440}>1440p</option>
-            <option value={2160}>2160p (4K)</option>
+            <option value={2160}>2160p</option>
           </select>
         </Row>
 
         <Row label="Fotogramas por segundo">
           <select
-            className="select"
+            className="cap"
             value={r.fps}
             onChange={(e) => onChange({ recording: { fps: Number(e.target.value) } })}
           >
-            <option value={30}>30 fps</option>
-            <option value={60}>60 fps</option>
-            <option value={120}>120 fps</option>
+            <option value={30}>30</option>
+            <option value={60}>60</option>
+            <option value={120}>120</option>
           </select>
         </Row>
 
-        <Row label="Bitrate" hint="En kbps. Mas bitrate es mas calidad y mas espacio en disco.">
+        <Row label="Calidad" hint="Mas bitrate es mas calidad y mas disco por hora.">
           <input
-            className="input input--narrow"
+            className="cap"
             type="number"
-            min={1000}
-            max={200000}
+            min={2000}
+            max={60000}
             step={1000}
             value={r.bitrate}
             onChange={(e) => onChange({ recording: { bitrate: Number(e.target.value) } })}
           />
         </Row>
 
-        <Row
-          label="Codificador"
-          hint={
-            encoders.length > 0
-              ? `Detectados: ${encoders.map((e) => e.label).join(', ')}`
-              : 'Todavia no se han detectado codificadores.'
-          }
-        >
+        <Row label="Codificador" hint="Automatico elige el de tu tarjeta grafica.">
           <select
-            className="select"
+            className="cap"
             value={r.encoder}
             onChange={(e) => onChange({ recording: { encoder: e.target.value } })}
           >
-            <option value="auto">Automatico (prefiere hardware)</option>
+            <option value="auto">Automatico</option>
             {encoders.map((encoder) => (
               <option key={encoder.id} value={encoder.id}>
                 {encoder.label}
-                {encoder.hardware ? '' : ' — software'}
               </option>
             ))}
           </select>
         </Row>
 
-        <Row
-          label="Modo de captura"
-          hint="La captura del proceso consume menos recursos. Si el juego corre como administrador, se cambia a pantalla automaticamente."
-        >
+        <Row label="Que se captura">
           <select
-            className="select"
+            className="cap"
             value={r.captureMode}
             onChange={(e) => onChange({ recording: { captureMode: e.target.value } })}
           >
@@ -207,7 +244,7 @@ function RecordingSettings({
             {r.outputFolder}
           </span>
           <button
-            className="btn btn--sm"
+            className="btn btn--ghost btn--sm"
             onClick={() =>
               void api.pickFolder().then((folder) => {
                 if (folder) onChange({ recording: { outputFolder: folder } });
@@ -217,7 +254,7 @@ function RecordingSettings({
             Cambiar
           </button>
           <button
-            className="btn btn--sm btn--quiet"
+            className="btn btn--ghost btn--sm"
             onClick={() =>
               void api
                 .openPath(r.outputFolder)
@@ -233,22 +270,21 @@ function RecordingSettings({
           hint="Si hay menos espacio libre que esto, no se inicia la grabacion."
         >
           <input
-            className="input input--narrow"
+            className="cap"
             type="number"
             min={1}
             max={500}
             value={r.minFreeSpaceGb}
             onChange={(e) => onChange({ recording: { minFreeSpaceGb: Number(e.target.value) } })}
           />
-          <span style={{ color: 'var(--text-2)' }}>GB</span>
         </Row>
 
         <Row
-          label="Detener grabacion por debajo de"
+          label="Detener por debajo de"
           hint="Durante la grabacion, si el disco baja de este limite, se corta de forma ordenada para no perder el video."
         >
           <input
-            className="input input--narrow"
+            className="cap"
             type="number"
             min={0.5}
             max={r.minFreeSpaceGb}
@@ -256,15 +292,15 @@ function RecordingSettings({
             value={r.stopAtFreeSpaceGb}
             onChange={(e) => onChange({ recording: { stopAtFreeSpaceGb: Number(e.target.value) } })}
           />
-          <span style={{ color: 'var(--text-2)' }}>GB</span>
         </Row>
       </div>
-    </div>
     </>
   );
 }
 
-function EventSettings({
+/* --- Momentos ------------------------------------------------------------ */
+
+function EventsTab({
   settings,
   onChange,
 }: {
@@ -272,359 +308,261 @@ function EventSettings({
   onChange: (patch: unknown) => void;
 }) {
   const e = settings.events;
+  const ui = settings.ui;
+  const c = settings.clips;
+
+  const detectors: Array<[keyof typeof e, string]> = [
+    ['detectKills', 'Detectar kills'],
+    ['detectDeaths', 'Detectar muertes'],
+    ['detectHeadshots', 'Detectar headshots'],
+    ['detectAssists', 'Detectar asistencias'],
+    ['detectRounds', 'Detectar rondas'],
+  ];
+
   return (
     <>
-      <div className="card">
-        <div className="rows">
-          <Row label="Detectar kills">
-            <Switch value={e.detectKills} onChange={(v) => onChange({ events: { detectKills: v } })} />
-          </Row>
-          <Row label="Detectar muertes">
-            <Switch value={e.detectDeaths} onChange={(v) => onChange({ events: { detectDeaths: v } })} />
-          </Row>
-          <Row label="Detectar headshots" hint="VALORANT y Rainbow Six Siege. League of Legends no tiene headshots.">
+      <span className="eyebrow">Que se marca</span>
+      <div className="rows">
+        {detectors.map(([key, label]) => (
+          <Row key={key} label={label}>
             <Switch
-              value={e.detectHeadshots}
-              onChange={(v) => onChange({ events: { detectHeadshots: v } })}
+              value={Boolean(e[key])}
+              onChange={(v) => onChange({ events: { [key]: v } })}
             />
           </Row>
-          <Row label="Detectar asistencias">
-            <Switch value={e.detectAssists} onChange={(v) => onChange({ events: { detectAssists: v } })} />
-          </Row>
-          <Row label="Detectar rondas" hint="Marcadores de inicio y fin de ronda.">
-            <Switch value={e.detectRounds} onChange={(v) => onChange({ events: { detectRounds: v } })} />
-          </Row>
-          <Row
-            label="Destacados por sonido"
-            hint="Al terminar de grabar, busca en el audio los momentos que destacan sobre el resto y los marca. Solo en partidas sin eventos del juego, y solo si se grabo sonido."
-          >
-            <Switch
-              value={e.audioHighlights}
-              onChange={(v) => onChange({ events: { audioHighlights: v } })}
-            />
-          </Row>
-        </div>
+        ))}
+        <Row
+          label="Destacados por sonido"
+          hint="Al terminar de grabar, busca en el audio los momentos que destacan sobre el resto. Solo en partidas sin eventos del juego, y solo si se grabo sonido."
+        >
+          <Switch
+            value={e.audioHighlights}
+            onChange={(v) => onChange({ events: { audioHighlights: v } })}
+          />
+        </Row>
       </div>
 
-      <div className="section">Calibracion de sincronizacion</div>
-      <div className="card">
-        <p style={{ color: 'var(--text-1)', fontSize: 13, marginTop: 0, lineHeight: 1.6 }}>
-          El proveedor de eventos detecta las acciones con un pequeno retraso respecto a lo
-          que ves en pantalla, porque lee el estado que expone el juego en lugar de su memoria.
-          Este ajuste desplaza los marcadores hacia atras para compensarlo. Si al pulsar una
-          kill el video empieza <em>despues</em> de la accion, sube el valor; si empieza
-          demasiado pronto, bajalo.
-        </p>
-        <div className="rows">
-          {(Object.keys(e.latencyOffsetMs) as GameKey[])
-            // Los juegos genericos no tienen marcadores automaticos que
-            // compensar: los pone quien juega, justo donde pulsa.
-            .filter((game) => game !== 'generic')
-            .map((game) => (
+      <span className="eyebrow">Juegos vigilados</span>
+      <div className="rows">
+        {(Object.keys(settings.games) as GameKey[]).map((game) => (
+          <Row
+            key={game}
+            label={GAME_DISPLAY_NAMES[game]}
+            hint={
+              game === 'generic'
+                ? 'Cualquier otro juego que detecte. Se graba entero, pero sin marcadores automaticos: esos los pones tu con el atajo.'
+                : undefined
+            }
+          >
+            <Switch
+              value={settings.games[game]}
+              onChange={(v) => onChange({ games: { [game]: v } })}
+            />
+          </Row>
+        ))}
+      </div>
+
+      <span className="eyebrow">Al reproducir y recortar</span>
+      <div className="rows">
+        <Row
+          label="Empezar unos segundos antes"
+          hint="Al saltar a un momento, el video arranca un poco antes para ver como llegaste."
+        >
+          <Switch
+            value={ui.playFromBeforeEnabled}
+            onChange={(v) => onChange({ ui: { playFromBeforeEnabled: v } })}
+          />
+          <input
+            className="cap"
+            type="number"
+            min={0}
+            max={30}
+            value={ui.playFromSecondsBefore}
+            onChange={(e2) => onChange({ ui: { playFromSecondsBefore: Number(e2.target.value) } })}
+          />
+        </Row>
+        <Row label="Segundos antes del momento" hint="Margen por defecto al crear un clip.">
+          <input
+            className="cap"
+            type="number"
+            min={0}
+            max={60}
+            value={c.secondsBefore}
+            onChange={(e2) => onChange({ clips: { secondsBefore: Number(e2.target.value) } })}
+          />
+        </Row>
+        <Row label="Segundos despues del momento">
+          <input
+            className="cap"
+            type="number"
+            min={0}
+            max={60}
+            value={c.secondsAfter}
+            onChange={(e2) => onChange({ clips: { secondsAfter: Number(e2.target.value) } })}
+          />
+        </Row>
+      </div>
+
+      <span className="eyebrow">Calibracion de sincronizacion</span>
+      <div className="rows">
+        {(Object.keys(e.latencyOffsetMs) as GameKey[])
+          // Los juegos genericos no tienen marcadores automaticos que
+          // compensar: los pone quien juega, justo donde pulsa.
+          .filter((game) => game !== 'generic')
+          .map((game) => (
             <Row
               key={game}
               label={GAME_DISPLAY_NAMES[game]}
               hint={
                 game === 'lol'
                   ? 'Solo se usa con Overwolf. Con la API de Riot la latencia se calcula sola.'
-                  : undefined
+                  : 'Desplaza los marcadores hacia atras para compensar el retraso del proveedor de eventos.'
               }
             >
               <input
-                className="input input--narrow"
+                className="cap"
                 type="number"
-                min={-5000}
-                max={5000}
+                min={0}
+                max={3000}
                 step={50}
                 value={e.latencyOffsetMs[game]}
-                onChange={(ev) =>
-                  onChange({
-                    events: { latencyOffsetMs: { [game]: Number(ev.target.value) } },
-                  })
+                onChange={(e2) =>
+                  onChange({ events: { latencyOffsetMs: { [game]: Number(e2.target.value) } } })
                 }
               />
-              <span style={{ color: 'var(--text-2)' }}>ms</span>
             </Row>
           ))}
-
-          <Row
-            label="Desfase de las repeticiones de Rainbow Six"
-            hint={
-              'Normalmente no hace falta tocarlo. Los eventos se situan tomando como ' +
-              'referencia el final de cada ronda, que no necesita calibracion. Este valor ' +
-              'solo entra en juego si esa referencia no es fiable, por ejemplo si las ' +
-              'repeticiones se han copiado o movido de sitio.'
-            }
-          >
-            <input
-              className="input input--narrow"
-              type="number"
-              min={-120000}
-              max={120000}
-              step={1000}
-              value={e.r6RoundOffsetMs}
-              onChange={(ev) =>
-                onChange({ events: { r6RoundOffsetMs: Number(ev.target.value) } })
-              }
-            />
-            <span style={{ color: 'var(--text-2)' }}>ms</span>
-          </Row>
-        </div>
-      </div>
-
-      <div className="section">Juegos vigilados</div>
-      <div className="card">
-        <div className="rows">
-          {(Object.keys(settings.games) as GameKey[]).map((game) => (
-            <Row
-              key={game}
-              label={GAME_DISPLAY_NAMES[game]}
-              hint={
-                game === 'generic'
-                  ? 'Cualquier otro juego que detecte. Se graba entero, pero sin marcadores automaticos: esos los pones tu con el atajo de marcador.'
-                  : undefined
-              }
-            >
-              <Switch
-                value={settings.games[game]}
-                onChange={(v) => onChange({ games: { [game]: v } })}
-              />
-            </Row>
-          ))}
-        </div>
       </div>
     </>
   );
 }
 
-function InterfaceSettings({
-  settings,
-  onChange,
-}: {
-  settings: AppSettings;
-  onChange: (patch: unknown) => void;
-}) {
-  const ui = settings.ui;
-  const clips = settings.clips;
-  return (
-    <>
-      <div className="card">
-        <div className="rows">
-          <Row label="Mostrar iconos en la timeline">
-            <Switch value={ui.showIcons} onChange={(v) => onChange({ ui: { showIcons: v } })} />
-          </Row>
-          <Row label="Tamano de los iconos">
-            <select
-              className="select"
-              value={ui.iconSize}
-              onChange={(ev) => onChange({ ui: { iconSize: ev.target.value } })}
-            >
-              <option value="small">Pequeno</option>
-              <option value="medium">Mediano</option>
-              <option value="large">Grande</option>
-            </select>
-          </Row>
-          <Row
-            label="Reproducir desde antes del evento"
-            hint="Al hacer clic en un marcador, retrocede unos segundos para ver el contexto."
-          >
-            <Switch
-              value={ui.playFromBeforeEnabled}
-              onChange={(v) => onChange({ ui: { playFromBeforeEnabled: v } })}
-            />
-          </Row>
-          <Row label="Segundos de contexto">
-            <input
-              className="input input--narrow"
-              type="number"
-              min={0}
-              max={60}
-              value={ui.playFromSecondsBefore}
-              onChange={(ev) => onChange({ ui: { playFromSecondsBefore: Number(ev.target.value) } })}
-            />
-            <span style={{ color: 'var(--text-2)' }}>s</span>
-          </Row>
-        </div>
-      </div>
+/* --- Atajos -------------------------------------------------------------- */
 
-      <div className="section">Clips</div>
-      <div className="card">
-        <div className="rows">
-          <Row label="Segundos antes del evento">
-            <input
-              className="input input--narrow"
-              type="number"
-              min={1}
-              max={120}
-              value={clips.secondsBefore}
-              onChange={(ev) => onChange({ clips: { secondsBefore: Number(ev.target.value) } })}
-            />
-          </Row>
-          <Row label="Segundos despues del evento">
-            <input
-              className="input input--narrow"
-              type="number"
-              min={1}
-              max={120}
-              value={clips.secondsAfter}
-              onChange={(ev) => onChange({ clips: { secondsAfter: Number(ev.target.value) } })}
-            />
-          </Row>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function HotkeySettings({
-  settings,
-  onChange,
-}: {
-  settings: AppSettings;
-  onChange: (patch: unknown) => void;
-}) {
+function HotkeysTab({ settings }: { settings: AppSettings }) {
   const h = settings.hotkeys;
-  const rows: Array<{ key: keyof typeof h; label: string; hint: string }> = [
-    { key: 'saveClip', label: 'Marcar para clip', hint: 'Marca el momento actual para recortarlo despues.' },
-    { key: 'bookmark', label: 'Marcar momento', hint: 'Anade un marcador manual a la timeline.' },
-    { key: 'toggleRecording', label: 'Iniciar / detener grabacion', hint: '' },
+  const rows: Array<[string, string, string]> = [
+    ['Guardar clip', h.saveClip, 'Recorta alrededor de este instante sin volver a grabar nada.'],
+    ['Marcar momento', h.bookmark, 'Deja una marca en la linea temporal para repasarla despues.'],
+    ['Grabar o detener', h.toggleRecording, 'Fuerza el inicio o el final de la grabacion.'],
   ];
 
   return (
     <>
-      <div className="card">
-        <div className="rows">
-          {rows.map((row) => (
-            <Row key={row.key} label={row.label} hint={row.hint}>
-              <input
-                className="input input--narrow"
-                value={h[row.key]}
-                onChange={(ev) => onChange({ hotkeys: { [row.key]: ev.target.value } })}
-                placeholder="F8"
-              />
-            </Row>
-          ))}
-        </div>
+      <div className="rows">
+        {rows.map(([label, key, hint]) => (
+          <Row key={label} label={label} hint={hint}>
+            <span className="kbd">{key}</span>
+          </Row>
+        ))}
       </div>
-      <div className="note" style={{ marginTop: 16 }}>
+
+      <div className="note">
         <div>
           <b>Sobre los atajos globales</b>
-            Se registran en el sistema, asi que funcionan con el juego en primer plano, incluso
-            a pantalla completa. La unica excepcion es un juego ejecutado como administrador:
-            en ese caso Windows bloquea la entrada de procesos sin privilegios y hay que abrir
-            Clipper tambien como administrador. Acepta combinaciones como{' '}
-            <span className="kbd">F8</span>, <span className="kbd">Ctrl+Shift+S</span> o{' '}
-            <span className="kbd">Alt+X</span>.
+          Funcionan con el juego en primer plano. Si otro programa ya usa la misma tecla, Windows
+          se la da al primero que la registro y aqui dejara de responder.
         </div>
       </div>
     </>
   );
 }
 
-function Diagnostics({ status }: { status: LiveStatus | null }) {
+/* --- Diagnostico --------------------------------------------------------- */
+
+function DiagnosticsTab({ status }: { status: LiveStatus | null }) {
   const [info, setInfo] = useState<Record<string, unknown> | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
   useEffect(() => {
     void api.getDiagnostics().then(setInfo).catch(() => undefined);
     void api.getLogs().then(setLogs).catch(() => undefined);
-    const unsubscribe = api.onLog((entry) => {
-      setLogs((previous) => [...previous.slice(-400), entry]);
-    });
-    return unsubscribe;
+    return api.onLog((entry) => setLogs((prev) => [...prev.slice(-400), entry]));
   }, []);
+
+  const captura = status?.recorder.backend === 'overwolf' ? 'Overwolf' : 'FFmpeg';
+  const eventos = status?.provider.provider === 'gep' ? 'GEP' : 'nativo';
+  const disco = status?.diskFreeGb != null ? `${Math.round(status.diskFreeGb)} GB libres` : null;
 
   return (
     <>
-      <div className="card">
-        <div className="rows">
-          <Row label="Proveedor de eventos" hint={status?.provider.message ?? ''}>
-            <strong>{status?.provider.status ?? 'desconocido'}</strong>
-          </Row>
-          <Row label="Sistema de captura" hint={status?.recorder.message ?? ''}>
-            <strong>{status?.recorder.backend ?? 'ninguno'}</strong>
-          </Row>
-          <Row label="Codificadores detectados">
-            <span style={{ color: 'var(--text-1)', fontSize: 12 }}>
-              {status?.recorder.encoders.map((e) => e.label).join(', ') || 'ninguno'}
-            </span>
-          </Row>
-          <UpdateRow />
-
-          {info?.valorant ? <ValorantDiagnostics data={info.valorant as Record<string, unknown>} /> : null}
-          {info &&
-            Object.entries(info)
-              .filter(([key]) => ['electron', 'node', 'chrome', 'platform', 'isElevated'].includes(key))
-              .map(([key, value]) => (
-                <Row key={key} label={labelFor(key)}>
-                  <span style={{ color: 'var(--text-1)', fontSize: 12 }}>{String(value)}</span>
-                </Row>
-              ))}
-        </div>
+      <div className="diag">
+        <span className="diag__dot" />
+        <span>
+          Captura {captura} · eventos {eventos}
+          {disco ? ` · ${disco}` : ''}
+        </span>
       </div>
 
-      <div className="section">Registro</div>
+      <div className="rows">
+        <UpdateRow />
+        <Row label="Proveedor de eventos" hint={status?.provider.message ?? ''}>
+          <span className="cap">{status?.provider.status ?? 'desconocido'}</span>
+        </Row>
+        <Row label="Sistema de captura" hint={status?.recorder.message ?? ''}>
+          <span className="cap">{status?.recorder.backend ?? 'ninguno'}</span>
+        </Row>
+        <Row label="Codificadores detectados">
+          <span className="row__hint">
+            {status?.recorder.encoders.map((e) => e.label).join(', ') || 'ninguno'}
+          </span>
+        </Row>
+        {info &&
+          (['electron', 'node', 'chrome', 'platform', 'isElevated'] as const).map((key) => (
+            <Row key={key} label={labelFor(key)}>
+              <span className="cap">{String(info[key])}</span>
+            </Row>
+          ))}
+      </div>
+
+      <span className="eyebrow">Registro</span>
       <div className="log">
-        {logs.length === 0 ? (
-          <div style={{ color: 'var(--text-2)' }}>Sin entradas todavia.</div>
-        ) : (
-          logs.slice(-250).map((entry, index) => (
-            <div key={index} className={`log-${entry.level}`}>
-              {new Date(entry.time).toLocaleTimeString('es-ES')}{' '}
-              <span className="log-tag">[{entry.tag}]</span> {entry.message}
-            </div>
-          ))
-        )}
+        {logs.length === 0
+          ? 'Sin entradas todavia.'
+          : logs
+              .map(
+                (entry) =>
+                  `${new Date(entry.time).toLocaleTimeString('es-ES')} [${entry.tag}] ${entry.message}`,
+              )
+              .join('\n')}
       </div>
     </>
   );
 }
 
 /**
- * Estado de la via nativa de VALORANT.
- *
- * El flujo solo queda confirmado con el juego abierto, asi que conviene que el
- * usuario pueda comprobarlo de un vistazo en lugar de adivinar.
- */
-/**
  * Version instalada y control manual de la actualizacion.
  *
  * El actualizador trabaja solo, pero eso no puede significar que no se sepa
- * que esta haciendo: aqui se ve el estado y se puede forzar la comprobacion
- * sin esperar al siguiente ciclo de cuatro horas.
+ * que esta haciendo.
  */
 function UpdateRow() {
   const { status, checking, check, install } = useUpdateStatus();
 
   return (
     <Row label="Version" hint={updateHint(status)}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ color: 'var(--text-2)', fontSize: 12 }}>
-          {status?.current ?? '...'}
-        </span>
-        {status?.state === 'ready' ? (
-          <button className="btn btn--sm" onClick={install}>
-            Reiniciar e instalar
-          </button>
-        ) : (
-          <button
-            className="btn btn--sm btn--quiet"
-            onClick={() => void check()}
-            disabled={checking || status?.state === 'downloading'}
-          >
-            {checking || status?.state === 'checking'
-              ? 'Comprobando...'
-              : status?.state === 'downloading'
-                ? `Descargando ${Math.round(status.progress ?? 0)}%`
-                : 'Buscar actualizaciones'}
-          </button>
-        )}
-      </div>
+      <span className="cap">{status?.current ?? '...'}</span>
+      {status?.state === 'ready' ? (
+        <button className="btn btn--sm" onClick={install}>
+          Reiniciar e instalar
+        </button>
+      ) : (
+        <button
+          className="btn btn--ghost btn--sm"
+          onClick={() => void check()}
+          disabled={checking || status?.state === 'downloading'}
+        >
+          {checking || status?.state === 'checking'
+            ? 'Comprobando...'
+            : status?.state === 'downloading'
+              ? `Descargando ${Math.round(status.progress ?? 0)}%`
+              : 'Buscar'}
+        </button>
+      )}
     </Row>
   );
 }
 
-/** Texto que acompana a la version, segun lo que este haciendo el actualizador. */
 function updateHint(status: UpdateStatus | null): string {
   switch (status?.state) {
     case 'downloading':
@@ -642,79 +580,13 @@ function updateHint(status: UpdateStatus | null): string {
   }
 }
 
-function ValorantDiagnostics({ data }: { data: Record<string, unknown> }) {
-  const ok = (value: unknown) => (value ? 'si' : 'no');
-  return (
-    <>
-      <Row label="VALORANT: registro del juego" hint="Necesario para saber tu region y version.">
-        <span style={{ color: 'var(--text-1)', fontSize: 12 }}>
-          {ok(data.gameLog)}
-          {data.version ? ` (${String(data.version)})` : ''}
-        </span>
-      </Row>
-      <Row label="VALORANT: cliente de Riot abierto">
-        <span style={{ color: 'var(--text-1)', fontSize: 12 }}>{ok(data.lockfile)}</span>
-      </Row>
-      <Row label="VALORANT: sesion disponible" hint={String(data.hint ?? '')}>
-        <span
-          style={{
-            color: data.session ? 'var(--success)' : 'var(--warning)',
-            fontSize: 12,
-            fontWeight: 600,
-          }}
-        >
-          {ok(data.session)}
-          {data.shard ? ` · region ${String(data.shard)}` : ''}
-        </span>
-      </Row>
-    </>
-  );
-}
-
-/** Estado de la actualizacion, en una linea y sin alarmar. */
-
 function labelFor(key: string): string {
-  const map: Record<string, string> = {
+  const labels: Record<string, string> = {
     electron: 'Version de Electron',
     node: 'Version de Node',
     chrome: 'Version de Chromium',
     platform: 'Plataforma',
     isElevated: 'Ejecutando como administrador',
   };
-  return map[key] ?? key;
-}
-
-// --- Controles reutilizables ------------------------------------------------
-
-function Row({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="row">
-      <div className="row__info">
-        <div className="row__label">{label}</div>
-        {hint && <div className="row__hint">{hint}</div>}
-      </div>
-      <div className="row__ctl">{children}</div>
-    </div>
-  );
-}
-
-function Switch({ value, onChange }: { value: boolean; onChange: (value: boolean) => void }) {
-  return (
-    <button
-      className={`sw${value ? ' sw--on' : ''}`}
-      onClick={() => onChange(!value)}
-      role="switch"
-      aria-checked={value}
-    >
-      <span className="sw__k" />
-    </button>
-  );
+  return labels[key] ?? key;
 }

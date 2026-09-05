@@ -66,6 +66,12 @@ const api: ClipperApi = {
   deleteClip: (id: string, deleteFile: boolean) =>
     call<{ deleted: boolean }>(IPC.DELETE_CLIP, { id, deleteFile }),
 
+  addBookmark: () => call<boolean>(IPC.ADD_BOOKMARK),
+
+  minimizeWindow: () => ipcRenderer.send(IPC.WINDOW_MINIMIZE),
+  toggleMaximizeWindow: () => ipcRenderer.send(IPC.WINDOW_MAXIMIZE),
+  closeWindow: () => ipcRenderer.send(IPC.WINDOW_CLOSE),
+
   getUpdateStatus: () => call<UpdateStatus>(IPC.GET_UPDATE_STATUS),
   checkForUpdate: () => call<UpdateStatus>(IPC.CHECK_UPDATE),
   installUpdate: () => call<boolean>(IPC.INSTALL_UPDATE),
