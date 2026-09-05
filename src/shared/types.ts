@@ -309,7 +309,28 @@ export interface HotkeySettings {
   toggleRecording: string;
 }
 
+/** Como se comporta la aplicacion cuando no la estas mirando. */
+export interface GeneralSettings {
+  /**
+   * Arrancar sola al iniciar sesion en Windows.
+   *
+   * Sin esto, la aplicacion solo graba si te acuerdas de abrirla despues de
+   * cada reinicio, que es justo cuando no te acuerdas.
+   */
+  startWithWindows: boolean;
+  /** Arrancar directamente en la bandeja, sin abrir la ventana. */
+  startMinimized: boolean;
+  /**
+   * Cerrar la ventana la esconde en la bandeja en lugar de salir.
+   *
+   * Es lo que permite que siga vigilando partidas con la ventana cerrada. Se
+   * puede desactivar para quien prefiera que la cruz signifique salir.
+   */
+  closeToTray: boolean;
+}
+
 export interface AppSettings {
+  general: GeneralSettings;
   recording: RecordingSettings;
   events: EventSettings;
   ui: UiSettings;

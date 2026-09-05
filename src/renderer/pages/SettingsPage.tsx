@@ -74,9 +74,37 @@ function RecordingSettings({
   onNotify: (title: string, message: string) => void;
 }) {
   const r = settings.recording;
+  const g = settings.general;
   const encoders = status?.recorder.encoders ?? [];
 
   return (
+    <>
+    <div className="section">En segundo plano</div>
+    <div className="card">
+      <div className="rows">
+        <Row
+          label="Arrancar con Windows"
+          hint="Se abre sola al iniciar sesion, directamente en la bandeja. Sin esto solo graba si te acuerdas de abrirla despues de cada reinicio."
+        >
+          <Switch
+            value={g.startWithWindows}
+            onChange={(v) => onChange({ general: { startWithWindows: v } })}
+          />
+        </Row>
+
+        <Row
+          label="Cerrar la ventana la esconde"
+          hint="Sigue vigilando partidas con la ventana cerrada. Para salir de verdad, boton derecho en el icono de la bandeja."
+        >
+          <Switch
+            value={g.closeToTray}
+            onChange={(v) => onChange({ general: { closeToTray: v } })}
+          />
+        </Row>
+      </div>
+    </div>
+
+    <div className="section">Captura</div>
     <div className="card">
       <div className="rows">
         <Row label="Grabacion automatica" hint="Empieza a grabar en cuanto se detecta un juego soportado.">
@@ -232,6 +260,7 @@ function RecordingSettings({
         </Row>
       </div>
     </div>
+    </>
   );
 }
 

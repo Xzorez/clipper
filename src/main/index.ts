@@ -2,7 +2,9 @@ import { app, BrowserWindow, protocol, shell, session, desktopCapturer } from 'e
 import { join } from 'node:path';
 import { serveLocalFile } from './rangeRequest';
 import { AppContext } from './AppContext';
+import { AppSettings, DetectionState } from '../shared/types';
 import { registerIpcHandlers } from './ipc/handlers';
+import { TrayIcon, applyStartWithWindows } from './TrayIcon';
 import { loggerRoot, createLogger } from '../core/logging/Logger';
 
 const log = createLogger('Main');
@@ -11,11 +13,34 @@ const log = createLogger('Main');
 // los atajos globales y la base de datos.
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
-  app.quit();
+  // `quit()` no es inmediato: el modulo sigue ejecutandose y la instancia
+  // sobrante llegaba a abrir la base de datos, registrar los atajos y crear un
+  // segundo icono de bandeja antes de morir. Con exit se va en el acto, y de
+  // avisar a la instancia buena ya se encarga el evento second-instance.
+  app.exit(0);
 }
 
 let mainWindow: BrowserWindow | null = null;
 let context: AppContext | null = null;
+let tray: TrayIcon | null = null;
+/** Distingue cerrar la ventana de salir de verdad. */
+let isQuitting = false;
+
+/**
+ * Trae la ventana al frente, volviendola a crear si hizo falta.
+ *
+ * Con la bandeja, la ventana puede estar escondida o no existir; desde fuera
+ * se pide "abrir Clipper" sin saber en cual de los dos casos estamos.
+ */
+function showMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
 
 /**
  * Esquema propio para servir los videos y miniaturas locales.
@@ -50,7 +75,23 @@ function createWindow(): void {
     },
   });
 
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  // Al arrancar con la sesion se queda en la bandeja: aparecer a pantalla
+  // completa en cada inicio de sesion seria insoportable, y lo que se quiere es
+  // que vigile, no que se haga notar.
+  const arrancaEscondida =
+    process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAtLogin;
+  mainWindow.once('ready-to-show', () => {
+    if (!arrancaEscondida) mainWindow?.show();
+  });
+
+  // Cerrar la ventana no es salir: la aplicacion tiene que seguir vigilando
+  // partidas. Antes, cerrarla mataba el proceso y no se grababa nada mas.
+  mainWindow.on('close', (event) => {
+    if (isQuitting) return;
+    if (!context?.settings.get().general.closeToTray) return;
+    event.preventDefault();
+    mainWindow?.hide();
+  });
 
   // Los enlaces externos se abren en el navegador, nunca dentro de la app.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -153,13 +194,13 @@ function registerAudioCapturePermissions(): void {
 }
 
 app.on('second-instance', () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
-  }
+  // Abrir la aplicacion otra vez cuando ya esta en la bandeja significa
+  // "muestramela", no "arranca otra".
+  showMainWindow();
 });
 
 app.whenReady().then(async () => {
+  if (!gotLock) return;
   loggerRoot.init(join(app.getPath('userData'), 'logs'), 'info');
   log.info(
     `Clipper arrancando | Electron ${process.versions.electron} | ` +
@@ -175,6 +216,24 @@ app.whenReady().then(async () => {
   registerIpcHandlers(context, () => mainWindow);
   context.attachWindowBridge(() => mainWindow);
 
+  const { general } = context.settings.get();
+  applyStartWithWindows(general.startWithWindows, general.startMinimized);
+  context.settings.on('changed', (updated: AppSettings) => {
+    applyStartWithWindows(updated.general.startWithWindows, updated.general.startMinimized);
+  });
+
+  tray = new TrayIcon({
+    show: showMainWindow,
+    toggleRecording: () => void context?.toggleRecording(),
+    quit: () => {
+      isQuitting = true;
+      app.quit();
+    },
+  });
+  tray.create();
+  context.onStatus = (status) =>
+    tray?.setState(status.state === DetectionState.RECORDING, status.gameName);
+
   createWindow();
 
   app.on('activate', () => {
@@ -183,6 +242,9 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
+  // Con la bandeja activa la ventana es solo una vista: que no quede ninguna
+  // abierta no significa que haya que salir.
+  if (context?.settings.get().general.closeToTray) return;
   app.quit();
 });
 
@@ -190,6 +252,8 @@ let shuttingDown = false;
 app.on('before-quit', (event) => {
   if (shuttingDown) return;
   shuttingDown = true;
+  isQuitting = true;
+  tray?.destroy();
   event.preventDefault();
 
   log.info('Cerrando la aplicacion de forma ordenada...');

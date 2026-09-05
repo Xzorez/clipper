@@ -8,6 +8,13 @@ const log = createLogger('Settings');
 
 export function defaultSettings(videosDir: string): AppSettings {
   return {
+    general: {
+      // Encendido de serie: la aplicacion no sirve de nada si no esta puesta
+      // cuando empiezas a jugar, y esa es justo la vez que no la abres.
+      startWithWindows: true,
+      startMinimized: true,
+      closeToTray: true,
+    },
     recording: {
       autoRecord: true,
       quality: 'high',

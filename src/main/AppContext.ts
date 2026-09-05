@@ -362,8 +362,27 @@ export class AppContext {
     return this.providerState;
   }
 
+  /**
+   * Aviso de cambio de estado para quien no vive dentro de la ventana.
+   *
+   * La bandeja tiene que poder decir si se esta grabando aunque la ventana
+   * este cerrada, que es justo cuando la ventana no puede contarselo.
+   */
+  onStatus: ((status: LiveStatus) => void) | null = null;
+
   private broadcastStatus(): void {
-    this.send(IPC.ON_STATUS, this.buildStatus());
+    const status = this.buildStatus();
+    this.send(IPC.ON_STATUS, status);
+    this.onStatus?.(status);
+  }
+
+  /** Empieza o detiene la grabacion, segun lo que haya ahora mismo. */
+  async toggleRecording(): Promise<void> {
+    if (this.recordingManager.isRecording) {
+      await this.detection.endRecording();
+    } else {
+      await this.detection.beginRecording();
+    }
   }
 
   notifyWarning(title: string, message: string): void {
