@@ -45,6 +45,10 @@ export function registerIpcHandlers(context: AppContext, getWindow: WindowGetter
 
   handle(IPC.GET_LOGS, () => loggerRoot.getBuffer());
 
+  handle(IPC.GET_UPDATE_STATUS, () => context.updates.getStatus());
+  handle(IPC.CHECK_UPDATE, () => context.updates.checkNow());
+  handle(IPC.INSTALL_UPDATE, () => context.updates.installNow());
+
   handle(IPC.GET_DIAGNOSTICS, async () => ({
     valorant: await diagnoseValorant(),
     version: context.updates.currentVersion,

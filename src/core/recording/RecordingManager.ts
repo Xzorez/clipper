@@ -24,6 +24,19 @@ const log = createLogger('Recording');
 /** Cada cuanto se vuelca el sidecar a disco durante la grabacion. */
 const SIDECAR_FLUSH_INTERVAL_MS = 15_000;
 
+/**
+ * Quien sabe capturar el sonido y entregarselo al grabador.
+ *
+ * Se inyecta en lugar de instanciarse aqui porque la captura depende de la
+ * ventana de Electron, y el gestor de grabaciones no deberia saber nada de
+ * ventanas. En los tests se sustituye por un doble.
+ */
+export interface AudioSource {
+  /** Arranca la captura. Devuelve la tuberia, o null si no habra sonido. */
+  begin(settings: AppSettings['recording']): Promise<string | null>;
+  end(): Promise<void>;
+}
+
 /** Datos necesarios para arrancar una grabacion. */
 export interface StartParams {
   adapter: GameAdapter;
@@ -68,6 +81,7 @@ export class RecordingManager extends EventEmitter {
   private readonly recordingClock: RecordingClock;
   private readonly diskGuard: DiskSpaceGuard;
   private readonly thumbnails: ThumbnailService;
+  private readonly audio?: AudioSource;
 
   private active: ActiveRecording | null = null;
   /** Arranque en curso que aun no ha fijado `active`. Ver `start()`. */
@@ -83,6 +97,8 @@ export class RecordingManager extends EventEmitter {
     recordingClock: RecordingClock;
     diskGuard: DiskSpaceGuard;
     thumbnails: ThumbnailService;
+    /** Opcional: sin el, se graba sin sonido. */
+    audio?: AudioSource;
   }) {
     super();
     this.db = deps.db;
@@ -91,6 +107,7 @@ export class RecordingManager extends EventEmitter {
     this.recordingClock = deps.recordingClock;
     this.diskGuard = deps.diskGuard;
     this.thumbnails = deps.thumbnails;
+    this.audio = deps.audio;
 
     this.wireRecorder();
     this.wireEvents();
@@ -256,17 +273,32 @@ export class RecordingManager extends EventEmitter {
     this.recordingClock.reset();
     this.eventManager.begin(adapter, settings.events);
 
+    // El sonido se prepara antes que el video para poder pasarle la tuberia al
+    // grabador. Si falla, se sigue adelante sin audio: una partida muda vale
+    // mucho mas que ninguna partida.
+    let audioPipePath: string | null = null;
+    if (this.audio) {
+      try {
+        audioPipePath = await this.audio.begin(settings.recording);
+      } catch (err) {
+        log.warn(`No se ha podido capturar el sonido: ${(err as Error).message}`);
+        audioPipePath = null;
+      }
+    }
+
     let started;
     try {
       started = await this.recorder.start({
         outputPathWithoutExt: outputBase,
         settings: settings.recording,
+        audioPipePath,
         gamePid: params.gamePid,
         gameProcessName: params.gameProcessName,
         gameIsElevated: params.gameIsElevated,
       });
     } catch (err) {
       this.eventManager.end();
+      await this.audio?.end().catch(() => undefined);
       // El mensaje del grabador ya explica que hacer cuando la causa es
       // conocida (por ejemplo, pantalla completa exclusiva). No se le anade
       // texto generico que lo diluya.
@@ -359,6 +391,10 @@ export class RecordingManager extends EventEmitter {
     result: StopRecordingResult,
     status: RecordingRecord['status'],
   ): Promise<RecordingRecord | null> {
+    // Se corta el sonido en cuanto termina el video, pase lo que pase: aqui
+    // desembocan tanto la parada normal como el cierre inesperado del juego.
+    await this.audio?.end().catch(() => undefined);
+
     const active = this.active;
     if (!active) return null;
 

@@ -321,3 +321,25 @@ export interface LogEntry {
 export function emptyRecorderCapabilities(): RecorderCapabilities {
   return { status: 'checking', available: false, backend: 'none', encoders: [], monitors: [] };
 }
+
+/** Estado del actualizador automatico, tal como lo ve la ventana. */
+export type UpdateState =
+  | 'idle'
+  | 'checking'
+  | 'downloading'
+  | 'ready'
+  | 'unavailable'
+  | 'disabled'
+  | 'error';
+
+export interface UpdateStatus {
+  state: UpdateState;
+  /** Version disponible o descargada, segun el estado. */
+  version?: string;
+  /** Porcentaje descargado, cuando esta en curso. */
+  progress?: number;
+  /** Motivo del fallo. Solo se rellena si alguien pidio comprobar a mano. */
+  error?: string;
+  /** Version que se esta ejecutando ahora mismo. */
+  current: string;
+}

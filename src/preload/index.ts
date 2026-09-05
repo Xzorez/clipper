@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '../shared/channels';
+import type { AudioCaptureRequest, AudioCaptureResult } from '../shared/audio';
 import type {
   AppSettings,
   ClipRecord,
@@ -10,6 +11,7 @@ import type {
   LogEntry,
   RecorderCapabilities,
   RecordingRecord,
+  UpdateStatus,
 } from '../shared/types';
 import type { ClipperApi, CreateClipRequest } from '../shared/api';
 
@@ -64,6 +66,10 @@ const api: ClipperApi = {
   deleteClip: (id: string, deleteFile: boolean) =>
     call<{ deleted: boolean }>(IPC.DELETE_CLIP, { id, deleteFile }),
 
+  getUpdateStatus: () => call<UpdateStatus>(IPC.GET_UPDATE_STATUS),
+  checkForUpdate: () => call<UpdateStatus>(IPC.CHECK_UPDATE),
+  installUpdate: () => call<boolean>(IPC.INSTALL_UPDATE),
+
   pickFolder: () => call<string | null>(IPC.PICK_FOLDER),
   openPath: (path: string) => call<boolean>(IPC.OPEN_PATH, path),
   revealPath: (path: string) => call<boolean>(IPC.REVEAL_PATH, path),
@@ -81,6 +87,12 @@ const api: ClipperApi = {
   onWarning: (cb: (warning: { title: string; message: string }) => void) =>
     subscribe(IPC.ON_WARNING, cb),
   onLog: (cb: (entry: LogEntry) => void) => subscribe(IPC.ON_LOG, cb),
+  onUpdateStatus: (cb: (status: UpdateStatus) => void) => subscribe(IPC.ON_UPDATE_STATUS, cb),
+
+  onAudioStart: (cb: (request: AudioCaptureRequest) => void) => subscribe(IPC.ON_AUDIO_START, cb),
+  onAudioStop: (cb: () => void) => subscribe(IPC.ON_AUDIO_STOP, cb),
+  audioReady: (result: AudioCaptureResult) => ipcRenderer.send(IPC.AUDIO_READY, result),
+  sendAudioChunk: (chunk: ArrayBuffer) => ipcRenderer.send(IPC.AUDIO_CHUNK, chunk),
 };
 
 contextBridge.exposeInMainWorld('clipper', api);

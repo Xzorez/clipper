@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { AppSettings, DetectionState, LiveStatus, RecordingRecord } from '@shared/types';
 import { api } from './lib/api';
 import { Logo } from './components/Logo';
+import { UpdateIndicator } from './components/UpdateIndicator';
+import { useUpdateStatus } from './lib/useUpdateStatus';
 import { IconHome, IconLibrary, IconClips, IconSettings } from './components/Icons';
 import { HomePage } from './pages/HomePage';
 import { LibraryPage } from './pages/LibraryPage';
@@ -36,6 +38,7 @@ export function App() {
   const [recordings, setRecordings] = useState<RecordingRecord[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [clipsToken, setClipsToken] = useState(0);
+  const update = useUpdateStatus();
 
   /**
    * Los avisos son puntuales y se van solos.
@@ -112,6 +115,8 @@ export function App() {
         </nav>
 
         <div className="sidebar__gap" />
+
+        <UpdateIndicator status={update.status} onInstall={update.install} />
 
         <div className={`pill${recording ? ' pill--live' : ''}`}>
           <span className={`dot ${recording ? 'dot--live' : 'dot--ready'}`} />

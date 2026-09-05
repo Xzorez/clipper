@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react';
-import { AppSettings, GAME_DISPLAY_NAMES, GameKey, LiveStatus, LogEntry } from '@shared/types';
+import {
+  AppSettings,
+  GAME_DISPLAY_NAMES,
+  GameKey,
+  LiveStatus,
+  LogEntry,
+  UpdateStatus,
+} from '@shared/types';
 import { api } from '../lib/api';
+import { useUpdateStatus } from '../lib/useUpdateStatus';
 
 export interface SettingsPageProps {
   settings: AppSettings | null;
@@ -149,14 +157,17 @@ function RecordingSettings({
           </select>
         </Row>
 
-        <Row label="Audio del sistema">
+        <Row
+          label="Audio del sistema"
+          hint="El sonido del juego. Si tu salida por defecto es un casco inalambrico apagado, Windows no deja capturarlo: enciendelo antes de jugar."
+        >
           <Switch
             value={r.captureSystemAudio}
             onChange={(v) => onChange({ recording: { captureSystemAudio: v } })}
           />
         </Row>
 
-        <Row label="Microfono">
+        <Row label="Microfono" hint="Tu voz, mezclada con el sonido del juego en la misma pista.">
           <Switch
             value={r.captureMicrophone}
             onChange={(v) => onChange({ recording: { captureMicrophone: v } })}
@@ -488,15 +499,7 @@ function Diagnostics({ status }: { status: LiveStatus | null }) {
               {status?.recorder.encoders.map((e) => e.label).join(', ') || 'ninguno'}
             </span>
           </Row>
-          <Row
-            label="Version"
-            hint="Las actualizaciones se descargan solas y se aplican al cerrar la aplicacion."
-          >
-            <span style={{ color: 'var(--text-2)', fontSize: 12 }}>
-              {String(info?.version ?? '...')}
-              {updateLabel(info?.updates as Record<string, unknown> | undefined)}
-            </span>
-          </Row>
+          <UpdateRow />
 
           {info?.valorant ? <ValorantDiagnostics data={info.valorant as Record<string, unknown>} /> : null}
           {info &&
@@ -533,6 +536,62 @@ function Diagnostics({ status }: { status: LiveStatus | null }) {
  * El flujo solo queda confirmado con el juego abierto, asi que conviene que el
  * usuario pueda comprobarlo de un vistazo en lugar de adivinar.
  */
+/**
+ * Version instalada y control manual de la actualizacion.
+ *
+ * El actualizador trabaja solo, pero eso no puede significar que no se sepa
+ * que esta haciendo: aqui se ve el estado y se puede forzar la comprobacion
+ * sin esperar al siguiente ciclo de cuatro horas.
+ */
+function UpdateRow() {
+  const { status, checking, check, install } = useUpdateStatus();
+
+  return (
+    <Row label="Version" hint={updateHint(status)}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ color: 'var(--text-2)', fontSize: 12 }}>
+          {status?.current ?? '...'}
+        </span>
+        {status?.state === 'ready' ? (
+          <button className="btn btn--sm" onClick={install}>
+            Reiniciar e instalar
+          </button>
+        ) : (
+          <button
+            className="btn btn--sm btn--quiet"
+            onClick={() => void check()}
+            disabled={checking || status?.state === 'downloading'}
+          >
+            {checking || status?.state === 'checking'
+              ? 'Comprobando...'
+              : status?.state === 'downloading'
+                ? `Descargando ${Math.round(status.progress ?? 0)}%`
+                : 'Buscar actualizaciones'}
+          </button>
+        )}
+      </div>
+    </Row>
+  );
+}
+
+/** Texto que acompana a la version, segun lo que este haciendo el actualizador. */
+function updateHint(status: UpdateStatus | null): string {
+  switch (status?.state) {
+    case 'downloading':
+      return 'Descargando en segundo plano. Se aplicara al cerrar la aplicacion.';
+    case 'ready':
+      return `La version ${status.version ?? 'nueva'} se aplicara al cerrar, o ahora si reinicias.`;
+    case 'unavailable':
+      return 'Estas en la ultima version.';
+    case 'error':
+      return `No se ha podido comprobar: ${status.error ?? 'error desconocido'}`;
+    case 'disabled':
+      return 'Las actualizaciones solo funcionan en la aplicacion instalada.';
+    default:
+      return 'Las actualizaciones se descargan solas y se aplican al cerrar la aplicacion.';
+  }
+}
+
 function ValorantDiagnostics({ data }: { data: Record<string, unknown> }) {
   const ok = (value: unknown) => (value ? 'si' : 'no');
   return (
@@ -563,19 +622,6 @@ function ValorantDiagnostics({ data }: { data: Record<string, unknown> }) {
 }
 
 /** Estado de la actualizacion, en una linea y sin alarmar. */
-function updateLabel(update: Record<string, unknown> | undefined): string {
-  if (!update) return '';
-  switch (update.state) {
-    case 'downloading':
-      return ` · descargando ${String(update.version ?? '')} (${String(update.progress ?? 0)}%)`;
-    case 'ready':
-      return ` · ${String(update.version)} lista, se aplicara al cerrar`;
-    case 'disabled':
-      return ' · sin empaquetar';
-    default:
-      return '';
-  }
-}
 
 function labelFor(key: string): string {
   const map: Record<string, string> = {

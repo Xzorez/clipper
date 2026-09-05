@@ -8,7 +8,9 @@ import type {
   LogEntry,
   RecorderCapabilities,
   RecordingRecord,
+  UpdateStatus,
 } from './types';
+import type { AudioCaptureRequest, AudioCaptureResult } from './audio';
 
 export interface CreateClipRequest {
   recordingId: string;
@@ -55,6 +57,12 @@ export interface ClipperApi {
   createClip(request: CreateClipRequest): Promise<ClipRecord>;
   deleteClip(id: string, deleteFile: boolean): Promise<{ deleted: boolean }>;
 
+  getUpdateStatus(): Promise<UpdateStatus>;
+  /** Comprueba a mano si hay version nueva y devuelve el resultado. */
+  checkForUpdate(): Promise<UpdateStatus>;
+  /** Cierra la aplicacion y aplica la version ya descargada. */
+  installUpdate(): Promise<boolean>;
+
   pickFolder(): Promise<string | null>;
   openPath(path: string): Promise<boolean>;
   revealPath(path: string): Promise<boolean>;
@@ -67,4 +75,13 @@ export interface ClipperApi {
   onLibraryChanged(callback: () => void): Unsubscribe;
   onWarning(callback: (warning: WarningPayload) => void): Unsubscribe;
   onLog(callback: (entry: LogEntry) => void): Unsubscribe;
+  onUpdateStatus(callback: (status: UpdateStatus) => void): Unsubscribe;
+
+  /** El proceso principal pide empezar a capturar sonido para una grabacion. */
+  onAudioStart(callback: (request: AudioCaptureRequest) => void): Unsubscribe;
+  onAudioStop(callback: () => void): Unsubscribe;
+  /** Responde que fuentes se han podido abrir de verdad. */
+  audioReady(result: AudioCaptureResult): void;
+  /** Entrega un bloque de audio en crudo (PCM 16 bits, 48 kHz, estereo). */
+  sendAudioChunk(chunk: ArrayBuffer): void;
 }

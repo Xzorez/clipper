@@ -3,12 +3,13 @@ import { join, resolve, sep } from 'node:path';
 import {
   AppSettings,
   DetectionState,
+  GAME_DISPLAY_NAMES,
   GameEvent,
   LiveStatus,
-  RecorderCapabilities,
-  emptyRecorderCapabilities,
-  GAME_DISPLAY_NAMES,
   ProviderState,
+  RecorderCapabilities,
+  UpdateStatus,
+  emptyRecorderCapabilities,
 } from '../shared/types';
 import { IPC } from '../shared/channels';
 import { Database } from '../core/database/Database';
@@ -18,6 +19,7 @@ import { ClipService } from '../core/services/ClipService';
 import { HotkeyService, HotkeyAction } from '../core/services/HotkeyService';
 import { RecoveryService } from '../core/services/RecoveryService';
 import { UpdateService } from '../core/services/UpdateService';
+import { AudioBridge } from './AudioBridge';
 import { AdapterRegistry } from '../core/games/registry';
 import { GepProvider } from '../core/gep/GepProvider';
 import { RiotLiveClientProvider } from '../core/providers/RiotLiveClientProvider';
@@ -106,6 +108,7 @@ export class AppContext {
       recordingClock: this.recordingClock,
       diskGuard,
       thumbnails: this.thumbnails,
+      audio: new AudioBridge(() => this.getWindow()),
     });
 
     this.gep = new GepProvider(this.registry);
@@ -193,6 +196,12 @@ export class AppContext {
 
     this.recordingManager.on('event', (event: GameEvent) => {
       this.send(IPC.ON_EVENT, event);
+    });
+
+    // La ventana refleja lo que hace el actualizador en vez de tener que
+    // preguntar: al entrar se ve si hay una descarga en curso.
+    this.updates.on('status', (status: UpdateStatus) => {
+      this.send(IPC.ON_UPDATE_STATUS, status);
     });
 
     this.recordingManager.on('stopped', () => {

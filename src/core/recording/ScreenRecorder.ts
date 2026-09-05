@@ -2,6 +2,11 @@ import { EventEmitter } from 'node:events';
 import { EncoderInfo, MonitorSummary, RecorderCapabilities, RecordingSettings } from '../../shared/types';
 
 export interface StartRecordingRequest {
+  /**
+   * Tuberia de la que FFmpeg leera el sonido, o null para grabar sin audio.
+   * La prepara quien sepa capturarlo; el grabador solo la consume.
+   */
+  audioPipePath?: string | null;
   /** Ruta de salida SIN extension: el backend anade la suya. */
   outputPathWithoutExt: string;
   settings: RecordingSettings;

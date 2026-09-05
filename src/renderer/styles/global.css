@@ -1228,3 +1228,104 @@ select {
   display: block;
   margin-bottom: 2px;
 }
+
+/* --- Aviso de actualizacion ----------------------------------------------
+   Vive en la barra lateral, justo encima del estado de grabacion. Solo se
+   pinta cuando hay descarga en curso o version lista, asi que puede permitirse
+   ocupar sitio: si esta, es porque hay algo que contar.
+------------------------------------------------------------------------- */
+
+.upd {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 11px 12px;
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  animation: upd-in 0.35s var(--ease) both;
+}
+
+@keyframes upd-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.upd__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+/* La barra lateral es estrecha: el texto se ajusta en vez de cortarse con
+   puntos suspensivos, que dejaban "Descargando actualizaci..." a medias. */
+.upd__text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.upd__pct {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  font-weight: 570;
+}
+
+/* Giro continuo: dice "esto sigue vivo" sin necesidad de texto. */
+.upd__spin {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-2, rgba(255, 255, 255, 0.18));
+  border-top-color: var(--accent);
+  animation: upd-spin 0.9s linear infinite;
+}
+
+@keyframes upd-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.upd__bar {
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.upd__bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.3s var(--ease);
+}
+
+.upd--ready .upd__text {
+  color: var(--text);
+}
+
+.upd__btn {
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: calc(var(--r) - 3px);
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 570;
+  cursor: pointer;
+  transition: filter 0.15s var(--ease);
+}
+
+.upd__btn:hover {
+  filter: brightness(1.12);
+}

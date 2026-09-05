@@ -1,4 +1,4 @@
-import { app, BrowserWindow, protocol, shell } from 'electron';
+import { app, BrowserWindow, protocol, shell, session, desktopCapturer } from 'electron';
 import { join } from 'node:path';
 import { serveLocalFile } from './rangeRequest';
 import { AppContext } from './AppContext';
@@ -103,6 +103,55 @@ function registerMediaProtocol(): void {
   });
 }
 
+/**
+ * Permite a la ventana capturar el sonido del sistema.
+ *
+ * Windows no expone ningun dispositivo con el que FFmpeg pueda grabar lo que
+ * suena; solo microfonos. Chromium si sabe hacerlo, pero hay que autorizarlo
+ * de forma explicita: `audio: 'loopback'` es lo que le dice que devuelva la
+ * mezcla del sistema en lugar de una entrada fisica.
+ *
+ * Se pide video ademas de audio porque la propia API lo exige. La ventana
+ * descarta la pista de video en cuanto la recibe: la imagen la graba FFmpeg,
+ * y mantener una segunda captura de pantalla viva mientras se juega solo
+ * costaria rendimiento.
+ */
+function registerAudioCapturePermissions(): void {
+  const current = session.defaultSession;
+
+  // Las peticiones vienen de la propia interfaz, que es codigo nuestro y no
+  // carga nada de fuera; conceder microfono y captura aqui no abre la puerta a
+  // terceros.
+  current.setPermissionRequestHandler((_contents, permission, callback) => {
+    callback(permission === 'media' || permission === 'display-capture');
+  });
+  current.setPermissionCheckHandler((_contents, permission) =>
+    permission === 'media' || permission === 'display-capture',
+  );
+
+  current.setDisplayMediaRequestHandler(
+    (_request, callback) => {
+      void desktopCapturer
+        .getSources({ types: ['screen'] })
+        .then((sources) => {
+          if (sources.length === 0) {
+            log.warn('No hay ninguna pantalla que ofrecer para capturar el sonido');
+            callback({});
+            return;
+          }
+          callback({ video: sources[0], audio: 'loopback' });
+        })
+        .catch((err: Error) => {
+          log.warn(`No se ha podido preparar la captura de sonido: ${err.message}`);
+          callback({});
+        });
+    },
+    // El selector del sistema pediria confirmacion al usuario cada vez; aqui
+    // la fuente ya esta decidida y la aplicacion debe arrancar sola.
+    { useSystemPicker: false },
+  );
+}
+
 app.on('second-instance', () => {
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -118,6 +167,7 @@ app.whenReady().then(async () => {
   );
 
   registerMediaProtocol();
+  registerAudioCapturePermissions();
 
   context = new AppContext();
   await context.initialize();

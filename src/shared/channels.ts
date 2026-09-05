@@ -20,6 +20,11 @@ export const IPC = {
   GET_LOGS: 'clipper:get-logs',
   GET_DIAGNOSTICS: 'clipper:get-diagnostics',
   RESTART_AS_ADMIN: 'clipper:restart-as-admin',
+  GET_UPDATE_STATUS: 'clipper:get-update-status',
+  CHECK_UPDATE: 'clipper:check-update',
+  INSTALL_UPDATE: 'clipper:install-update',
+  AUDIO_CHUNK: 'clipper:audio-chunk',
+  AUDIO_READY: 'clipper:audio-ready',
 
   // Notificaciones (main -> renderer)
   ON_STATUS: 'clipper:on-status',
@@ -28,6 +33,9 @@ export const IPC = {
   ON_WARNING: 'clipper:on-warning',
   ON_LOG: 'clipper:on-log',
   ON_NAVIGATE: 'clipper:on-navigate',
+  ON_UPDATE_STATUS: 'clipper:on-update-status',
+  ON_AUDIO_START: 'clipper:on-audio-start',
+  ON_AUDIO_STOP: 'clipper:on-audio-stop',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

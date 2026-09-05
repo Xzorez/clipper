@@ -125,7 +125,12 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
   /** Metodo de captura en uso, decidido por el sondeo automatico. */
   private activeCandidate: CaptureCandidate = { method: 'ddagrab', outputIndex: 0 };
   private pendingRequest: StartRecordingRequest | null = null;
-  private pendingArgsContext: { encoder: string; width: number; height: number } | null = null;
+  private pendingArgsContext: {
+    encoder: string;
+    width: number;
+    height: number;
+    audioPipe: string | null;
+  } | null = null;
   private verifyTimer: NodeJS.Timeout | null = null;
 
   /**
@@ -265,7 +270,12 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
 
     this.currentFilePath = request.outputPathWithoutExt + '.mp4';
     this.pendingRequest = request;
-    this.pendingArgsContext = { encoder, width: output.width, height: output.height };
+    this.pendingArgsContext = {
+      encoder,
+      width: output.width,
+      height: output.height,
+      audioPipe: request.audioPipePath ?? null,
+    };
     this.lastOutTimeMs = 0;
     this.firstFrameSeen = false;
     this.stopping = false;
@@ -374,6 +384,7 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
         fps: request.settings.fps,
         bitrateKbps: request.settings.bitrate,
         outputIndex: candidate.outputIndex,
+        audioPipe: context.audioPipe,
       },
       this.currentFilePath,
     );
