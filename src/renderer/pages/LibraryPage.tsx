@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { RecordingCard } from '../components/RecordingCard';
 import { GameFilter, GameFilterValue } from '../components/GameFilter';
 import { IconMore } from '../components/Icons';
+import { useDismiss } from '../lib/useDismiss';
 
 export interface LibraryPageProps {
   recordings: RecordingRecord[];
@@ -26,6 +27,7 @@ export function LibraryPage({
 }: LibraryPageProps) {
   const [filter, setFilter] = useState<GameFilterValue>('all');
   const [menu, setMenu] = useState<string | null>(null);
+  useDismiss(menu !== null, () => setMenu(null));
 
   const filtered = useMemo(
     () => (filter === 'all' ? recordings : recordings.filter((r) => r.game === filter)),
@@ -72,6 +74,7 @@ export function LibraryPage({
 
               <button
                 className="ctl"
+                data-menu
                 title="Mas opciones"
                 style={{ position: 'absolute', top: 8, right: 8, width: 26, height: 26 }}
                 onClick={(e) => {
@@ -85,6 +88,7 @@ export function LibraryPage({
               {menu === recording.id && (
                 <div
                   className="panel"
+                  data-menu
                   style={{
                     position: 'absolute',
                     top: 38,

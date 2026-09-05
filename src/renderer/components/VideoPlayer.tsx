@@ -63,8 +63,16 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     getCurrentTime: () => videoRef.current?.currentTime ?? 0,
   }));
 
-  // Bucle de refresco: solo mientras se reproduce, para no gastar en balde.
+  /**
+   * Bucle de refresco, solo mientras se reproduce.
+   *
+   * En pausa no hay nada que actualizar, y esta pantalla se deja abierta
+   * mientras se repasa una partida: mantener un requestAnimationFrame vivo
+   * sesenta veces por segundo para no mover nada seria gastar bateria a
+   * cambio de nada.
+   */
   useEffect(() => {
+    if (!playing) return;
     const tick = () => {
       const video = videoRef.current;
       if (video) {
@@ -75,6 +83,15 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     };
     frameRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frameRef.current);
+  }, [onTimeUpdate, playing]);
+
+  // Al saltar con el video en pausa hay que refrescar igual: si no, el cabezal
+  // de la linea temporal se quedaria donde estaba.
+  const sync = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    setCurrent(video.currentTime);
+    onTimeUpdate(video.currentTime);
   }, [onTimeUpdate]);
 
   const toggle = useCallback(() => {
@@ -102,6 +119,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
           src={src}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
+          onSeeked={sync}
           onLoadedMetadata={(e) => onDurationChange(e.currentTarget.duration || 0)}
           onError={() =>
             onError(

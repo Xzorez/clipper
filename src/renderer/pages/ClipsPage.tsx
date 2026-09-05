@@ -3,6 +3,7 @@ import { ClipRecord } from '@shared/types';
 import { api } from '../lib/api';
 import { formatDateShort, formatTime, gameShort } from '../lib/events';
 import { IconMore } from '../components/Icons';
+import { useDismiss } from '../lib/useDismiss';
 
 type Sort = 'recent' | 'game';
 
@@ -23,6 +24,7 @@ export function ClipsPage({ refreshToken, onNotify }: ClipsPageProps) {
   const [sort, setSort] = useState<Sort>('recent');
   const [playing, setPlaying] = useState<ClipRecord | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
+  useDismiss(menu !== null, () => setMenu(null));
 
   const load = () => {
     void api
@@ -158,6 +160,7 @@ export function ClipsPage({ refreshToken, onNotify }: ClipsPageProps) {
 
                 <button
                   className="ctl"
+                  data-menu
                   title="Mas opciones"
                   style={{ position: 'absolute', top: 8, left: 8, width: 26, height: 26 }}
                   onClick={() => setMenu(menu === clip.id ? null : clip.id)}
@@ -168,6 +171,7 @@ export function ClipsPage({ refreshToken, onNotify }: ClipsPageProps) {
                 {menu === clip.id && (
                   <div
                     className="panel"
+                    data-menu
                     style={{
                       position: 'absolute',
                       top: 38,

@@ -157,22 +157,34 @@ button {
 .content {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow: auto;
 }
 
+/* Las paginas normales crecen con su contenido y hacen desplazar la ventana. */
 .page {
+  flex: 1 0 auto;
   padding: 26px 28px;
   display: flex;
   flex-direction: column;
   gap: 22px;
-  min-height: 100%;
 }
 
-/* La pagina del reproductor manda sobre su propio espacio: la linea temporal
-   va anclada abajo y no debe empujar nada. */
+/*
+ * El reproductor no crece: se reparte el alto que hay.
+ *
+ * La linea temporal va anclada abajo y tiene que verse siempre; si la pagina
+ * pudiera estirarse, el panel lateral la empujaria fuera de la pantalla y
+ * habria que desplazar para leer la partida, que es justo lo contrario de lo
+ * que hace esa linea. Lo que se desplaza, si hace falta, es el panel lateral.
+ */
 .page--flush {
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 0;
   gap: 0;
+  overflow: hidden;
 }
 
 .rise {
@@ -998,7 +1010,7 @@ button {
 .player {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
   min-height: 0;
 }
 

@@ -3,8 +3,6 @@ import {
   AppSettings,
   DetectionState,
   GameEvent,
-  GameEventType,
-  GameKey,
   LiveStatus,
   RecordingRecord,
 } from '@shared/types';
@@ -277,15 +275,3 @@ export function HomePage({
     </>
   );
 }
-
-/** Tipos que cuentan como "momento" en la tira en vivo. */
-export const MOMENT_TYPES: GameEventType[] = [
-  GameEventType.KILL,
-  GameEventType.DEATH,
-  GameEventType.HEADSHOT,
-  GameEventType.ASSIST,
-  GameEventType.BOOKMARK,
-  GameEventType.HIGHLIGHT,
-];
-
-export type { GameKey };
