@@ -56,7 +56,7 @@ export function HomePage({
                 <div className="stage__hint">
                   {detected
                     ? 'Listo para grabar esta partida.'
-                    : 'Abre VALORANT, Rainbow Six Siege o League of Legends y empezara sola.'}
+                    : 'Abre un juego y empezara sola. VALORANT, Rainbow Six Siege y League of Legends ademas marcan los momentos solos.'}
                 </div>
               </>
             )}

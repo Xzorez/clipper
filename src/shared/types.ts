@@ -3,8 +3,15 @@
  * Este fichero NO debe importar nada de Electron ni de Node: se usa en ambos lados.
  */
 
-/** Juegos soportados por la aplicacion. */
-export type GameKey = 'valorant' | 'rainbowsix' | 'lol';
+/**
+ * Juegos que la aplicacion sabe manejar.
+ *
+ * Los tres primeros tienen adaptador propio y producen marcadores solos.
+ * `generic` es cualquier otro juego: se graba igual, pero sin eventos
+ * automaticos, porque no hay ninguna fuente de datos de la que sacarlos. Ahi
+ * los momentos los marca quien juega, con el atajo de marcador.
+ */
+export type GameKey = 'valorant' | 'rainbowsix' | 'lol' | 'generic';
 
 /**
  * IDs reales de Overwolf GEP.
@@ -14,6 +21,9 @@ export const GEP_GAME_IDS: Record<GameKey, number> = {
   valorant: 21640,
   rainbowsix: 10826,
   lol: 5426,
+  // Los juegos genericos no existen para GEP: se detectan por su cuenta y el
+  // cero queda fuera de la lista que se le pide a Overwolf.
+  generic: 0,
 };
 
 /** IDs adicionales que deben mapearse al mismo adaptador (p.ej. el PBE de LoL). */
@@ -24,10 +34,23 @@ export const GEP_GAME_ID_ALIASES: Record<number, GameKey> = {
   22848: 'lol', // LeagueofLegendsPBE
 };
 
+/**
+ * Nombre a mostrar de una partida.
+ *
+ * Los juegos con adaptador propio se llaman siempre igual. Los genericos
+ * llevan el nombre que se detecto al grabar, porque "Otros juegos" repetido
+ * cincuenta veces no le dice nada a nadie.
+ */
+export function gameLabel(game: GameKey, title?: string | null): string {
+  const trimmed = title?.trim();
+  return trimmed || GAME_DISPLAY_NAMES[game];
+}
+
 export const GAME_DISPLAY_NAMES: Record<GameKey, string> = {
   valorant: 'VALORANT',
   rainbowsix: 'Rainbow Six Siege',
   lol: 'League of Legends',
+  generic: 'Otros juegos',
 };
 
 /**
@@ -162,6 +185,14 @@ export interface RecordingSummary {
 export interface RecordingRecord {
   id: string;
   game: GameKey;
+  /**
+   * Nombre del juego detectado, para los que no tienen adaptador propio.
+   *
+   * Sin esto, todas las partidas de juegos genericos se llamarian igual y la
+   * biblioteca seria inservible. Los tres juegos conocidos no lo necesitan:
+   * su nombre ya lo da la clave.
+   */
+  title?: string | null;
   filePath: string;
   thumbnailPath: string | null;
   startedAt: number;

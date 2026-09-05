@@ -16,6 +16,7 @@ const GAME_FILTERS: Array<{ key: GameKey | 'all'; label: string }> = [
   { key: 'valorant', label: 'VALORANT' },
   { key: 'rainbowsix', label: 'Rainbow Six' },
   { key: 'lol', label: 'League of Legends' },
+  { key: 'generic', label: 'Otros' },
 ];
 
 export function LibraryPage({

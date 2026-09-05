@@ -3,6 +3,7 @@ import { GameAdapter } from './GameAdapter';
 import { ValorantAdapter } from './ValorantAdapter';
 import { RainbowSixAdapter } from './RainbowSixAdapter';
 import { LeagueOfLegendsAdapter } from './LeagueOfLegendsAdapter';
+import { GenericGameAdapter } from './GenericGameAdapter';
 
 /**
  * Registro de adaptadores. Es el unico sitio donde se conocen los tres juegos
@@ -17,6 +18,7 @@ export class AdapterRegistry {
       new ValorantAdapter(),
       new RainbowSixAdapter(),
       new LeagueOfLegendsAdapter(),
+      new GenericGameAdapter(),
     ];
     for (const adapter of list) this.adapters.set(adapter.game, adapter);
   }
@@ -44,7 +46,11 @@ export class AdapterRegistry {
   /** Todos los game ids de GEP que nos interesan, incluidos los alias. */
   gepGameIds(): number[] {
     const ids = new Set<number>();
-    for (const adapter of this.all()) ids.add(adapter.gepGameId);
+    // El adaptador generico declara el id cero porque no existe en GEP; pedirle
+    // a Overwolf el juego numero cero no tendria ningun sentido.
+    for (const adapter of this.all()) {
+      if (adapter.gepGameId > 0) ids.add(adapter.gepGameId);
+    }
     for (const [id, key] of Object.entries(GEP_GAME_ID_ALIASES)) {
       if (this.adapters.has(key)) ids.add(Number(id));
     }

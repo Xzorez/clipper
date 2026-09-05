@@ -330,11 +330,24 @@ describe('AdapterRegistry', () => {
     expect(ids).toContain(22848);
   });
 
-  it('cada adaptador expone las features que realmente usa', () => {
-    for (const adapter of registry.all()) {
+  it('cada adaptador de GEP expone las features que realmente usa', () => {
+    // Los que tienen id de GEP dependen de que Overwolf les active features
+    // concretas; pedir una lista vacia los dejaria sin eventos.
+    for (const adapter of registry.all().filter((a) => a.gepGameId > 0)) {
       const features = adapter.requiredFeatures();
       expect(features).not.toBeNull();
       expect(features!.length).toBeGreaterThan(0);
     }
+  });
+
+  it('el adaptador generico no pide nada a GEP ni normaliza eventos', () => {
+    const generico = registry.get('generic');
+    expect(generico).toBeDefined();
+    // No existe en GEP, asi que queda fuera de la lista que se le pide.
+    expect(generico!.gepGameId).toBe(0);
+    expect(registry.gepGameIds()).not.toContain(0);
+    expect(generico!.requiredFeatures()).toBeNull();
+    // Y nunca se autoasigna por nombre de proceso: lo elige el detector.
+    expect(generico!.detect('cualquiercosa.exe')).toBe(false);
   });
 });

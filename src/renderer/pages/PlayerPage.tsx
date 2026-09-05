@@ -3,7 +3,7 @@ import {
   AppSettings,
   GameEvent,
   GameEventType,
-  GAME_DISPLAY_NAMES,
+  gameLabel,
   RecordingRecord,
 } from '@shared/types';
 import { api } from '../lib/api';
@@ -310,7 +310,7 @@ function SummaryBar({
   return (
     <div className="summary">
       <div>
-        <div className="summary__game">{GAME_DISPLAY_NAMES[recording.game]}</div>
+        <div className="summary__game">{gameLabel(recording.game, recording.title)}</div>
         <div style={{ color: 'var(--text-2)', fontSize: 12 }}>
           {formatDate(recording.startedAt)} · {formatTime(recording.duration ?? 0)}
           {recording.resolution && ` · ${recording.resolution}`}

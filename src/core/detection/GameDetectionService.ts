@@ -8,6 +8,7 @@ import {
 } from '../../shared/types';
 import { GepProvider, GepGameDetectedInfo } from '../gep/GepProvider';
 import { ProcessWatcher, DetectedProcess } from './ProcessWatcher';
+import { GenericGameDetector, DetectedGame } from './GenericGameDetector';
 import { AdapterRegistry } from '../games/registry';
 import { GameAdapter, RawGameEvent } from '../games/GameAdapter';
 import { EventManager } from '../events/EventManager';
@@ -59,6 +60,8 @@ export class GameDetectionService extends EventEmitter {
   private activeAdapter: GameAdapter | null = null;
   private activePid: number | undefined;
   private activeProcessName: string | undefined;
+  /** Nombre del juego detectado, solo para los que no tienen adaptador propio. */
+  private activeTitle: string | undefined;
   private activeIsElevated = false;
   private elevationRequired = false;
   private lastError: string | null = null;
@@ -77,6 +80,7 @@ export class GameDetectionService extends EventEmitter {
     private readonly riot?: RiotLiveClientProvider,
     private readonly r6Replay?: R6ReplayProvider,
     private readonly valorant?: ValorantMatchProvider,
+    private readonly genericDetector?: GenericGameDetector,
   ) {
     super();
     this.wire();
@@ -97,6 +101,7 @@ export class GameDetectionService extends EventEmitter {
     // El vigilante de procesos arranca siempre: si GEP acaba estando
     // disponible, se apaga solo al recibir el primer game-detected de GEP.
     this.processWatcher.start();
+    this.genericDetector?.start();
     // El sondeo de Riot es barato (una conexion local que falla al instante
     // cuando no hay partida) y no depende de Overwolf en absoluto.
     this.riot?.start();
@@ -172,6 +177,23 @@ export class GameDetectionService extends EventEmitter {
       void this.onGameDetected(found.adapter, found.pid, found.processName);
     });
 
+    // Juegos sin adaptador propio. No compite con los tres conocidos: el
+    // detector se aparta solo en cuanto ve alguno de ellos corriendo.
+    if (this.genericDetector) {
+      this.genericDetector.setKnownProcessNames(
+        this.registry.all().flatMap((adapter) => adapter.processNames),
+      );
+      this.genericDetector.on('game-detected', (found: DetectedGame) => {
+        if (!this.settingsService.get().games.generic) return;
+        const adapter = this.registry.get('generic');
+        if (!adapter) return;
+        void this.onGameDetected(adapter, found.pid, found.processName, found.title);
+      });
+      this.genericDetector.on('game-exit', () => {
+        if (this.activeAdapter?.game === 'generic') void this.onGameExit();
+      });
+    }
+
     this.processWatcher.on('game-exit', () => {
       if (this.gepUsable) return;
       void this.onGameExit();
@@ -243,6 +265,7 @@ export class GameDetectionService extends EventEmitter {
     adapter: GameAdapter,
     pid: number | undefined,
     processName: string | undefined,
+    title?: string,
   ): Promise<void> {
     // Ya estamos con este juego: nada que hacer.
     //
@@ -269,6 +292,7 @@ export class GameDetectionService extends EventEmitter {
     this.activeAdapter = adapter;
     this.activePid = pid;
     this.activeProcessName = processName;
+    this.activeTitle = title;
     this.lastError = null;
     this.setState(DetectionState.GAME_DETECTED);
     log.info(`${adapter.displayName} detectado`);
@@ -327,6 +351,7 @@ export class GameDetectionService extends EventEmitter {
       gamePid: this.activePid,
       gameProcessName: this.activeProcessName ?? this.activeAdapter.processNames[0],
       gameIsElevated: this.activeIsElevated,
+      gameTitle: this.activeTitle,
     });
 
     if (!started) {
@@ -424,6 +449,7 @@ export class GameDetectionService extends EventEmitter {
     this.r6Replay?.dispose();
     this.valorant?.dispose();
     this.processWatcher.dispose();
+    this.genericDetector?.dispose();
     this.gep.dispose();
     this.removeAllListeners();
   }

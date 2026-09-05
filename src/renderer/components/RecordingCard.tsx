@@ -1,4 +1,4 @@
-import { GAME_DISPLAY_NAMES, RecordingRecord } from '@shared/types';
+import { gameLabel, RecordingRecord } from '@shared/types';
 import { api } from '../lib/api';
 import { formatDateShort, formatTime } from '../lib/events';
 import { IconFilm } from './Icons';
@@ -39,7 +39,7 @@ export function RecordingCard({
       </div>
 
       <div className="rec__body">
-        <div className="rec__game">{GAME_DISPLAY_NAMES[recording.game]}</div>
+        <div className="rec__game">{gameLabel(recording.game, recording.title)}</div>
         <div className="rec__date">{formatDateShort(recording.startedAt)}</div>
 
         {summary && (

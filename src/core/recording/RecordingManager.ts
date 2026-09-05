@@ -44,6 +44,8 @@ export interface StartParams {
   gamePid?: number;
   gameProcessName?: string;
   gameIsElevated?: boolean;
+  /** Nombre real del juego, para los que no tienen adaptador propio. */
+  gameTitle?: string;
 }
 
 export interface ActiveRecording {
@@ -321,6 +323,7 @@ export class RecordingManager extends EventEmitter {
       this.db.createRecording({
         id,
         game: adapter.game,
+        title: params.gameTitle ?? null,
         filePath: started.filePath,
         startedAt,
         resolution: started.resolution,

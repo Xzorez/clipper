@@ -26,6 +26,7 @@ import { RiotLiveClientProvider } from '../core/providers/RiotLiveClientProvider
 import { R6ReplayProvider } from '../core/providers/r6/R6ReplayProvider';
 import { ValorantMatchProvider } from '../core/providers/valorant/ValorantMatchProvider';
 import { ProcessWatcher } from '../core/detection/ProcessWatcher';
+import { GenericGameDetector } from '../core/detection/GenericGameDetector';
 import { GameDetectionService } from '../core/detection/GameDetectionService';
 import { EventManager, emptySummary } from '../core/events/EventManager';
 import { RecordingClock } from '../core/synchronization/RecordingClock';
@@ -126,6 +127,7 @@ export class AppContext {
       this.riot,
       this.r6Replay,
       this.valorant,
+      new GenericGameDetector(),
     );
 
     this.hotkeys = new HotkeyService();

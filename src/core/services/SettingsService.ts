@@ -42,6 +42,9 @@ export function defaultSettings(videosDir: string): AppSettings {
         valorant: 250,
         rainbowsix: 300,
         lol: 400,
+        // Los marcadores manuales no llevan compensacion: se ponen justo donde
+        // se pulsa la tecla, que es lo que espera quien la pulsa.
+        generic: 0,
       },
       // Sin medir contra una partida real no hay forma honesta de estimarlo,
       // asi que se parte de cero y el usuario lo ajusta una vez.
@@ -65,6 +68,7 @@ export function defaultSettings(videosDir: string): AppSettings {
       toggleRecording: 'F10',
     },
     games: {
+      generic: true,
       valorant: true,
       rainbowsix: true,
       lol: true,

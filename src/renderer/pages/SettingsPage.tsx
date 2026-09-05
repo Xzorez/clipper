@@ -278,7 +278,11 @@ function EventSettings({
           demasiado pronto, bajalo.
         </p>
         <div className="rows">
-          {(Object.keys(e.latencyOffsetMs) as GameKey[]).map((game) => (
+          {(Object.keys(e.latencyOffsetMs) as GameKey[])
+            // Los juegos genericos no tienen marcadores automaticos que
+            // compensar: los pone quien juega, justo donde pulsa.
+            .filter((game) => game !== 'generic')
+            .map((game) => (
             <Row
               key={game}
               label={GAME_DISPLAY_NAMES[game]}
@@ -334,7 +338,15 @@ function EventSettings({
       <div className="card">
         <div className="rows">
           {(Object.keys(settings.games) as GameKey[]).map((game) => (
-            <Row key={game} label={GAME_DISPLAY_NAMES[game]}>
+            <Row
+              key={game}
+              label={GAME_DISPLAY_NAMES[game]}
+              hint={
+                game === 'generic'
+                  ? 'Cualquier otro juego que detecte. Se graba entero, pero sin marcadores automaticos: esos los pones tu con el atajo de marcador.'
+                  : undefined
+              }
+            >
               <Switch
                 value={settings.games[game]}
                 onChange={(v) => onChange({ games: { [game]: v } })}

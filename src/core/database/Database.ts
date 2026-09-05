@@ -137,6 +137,26 @@ export class Database {
     insertGame.run('valorant', 'VALORANT');
     insertGame.run('rainbowsix', 'Rainbow Six Siege');
     insertGame.run('lol', 'League of Legends');
+    insertGame.run('generic', 'Otros juegos');
+
+    // La columna del titulo se anadio despues de las primeras versiones. No
+    // basta con CREATE TABLE IF NOT EXISTS: quien ya tenga la base de datos
+    // creada no la recibiria, y las consultas fallarian al leerla.
+    this.addColumnIfMissing('recordings', 'title', 'TEXT');
+  }
+
+  /**
+   * Anade una columna solo si falta.
+   *
+   * SQLite no tiene ALTER TABLE ADD COLUMN IF NOT EXISTS, asi que se mira
+   * antes que columnas hay. Repetirlo en cada arranque no cuesta nada y evita
+   * tener que llevar la cuenta de por que version pasa cada instalacion.
+   */
+  private addColumnIfMissing(table: string, column: string, type: string): void {
+    const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (columns.some((c) => c.name === column)) return;
+    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    log.info(`Columna ${table}.${column} anadida`);
   }
 
   private stmt(sql: string): StatementSync {
@@ -160,15 +180,17 @@ export class Database {
     resolution?: string | null;
     fps?: number | null;
     encoder?: string | null;
+    title?: string | null;
   }): void {
     this.stmt(
       `INSERT INTO recordings
-         (id, game, file_path, thumbnail_path, started_at, ended_at, duration,
+         (id, game, title, file_path, thumbnail_path, started_at, ended_at, duration,
           resolution, fps, encoder, status, created_at)
-       VALUES (?, ?, ?, NULL, ?, NULL, NULL, ?, ?, ?, 'recording', ?)`,
+       VALUES (?, ?, ?, ?, NULL, ?, NULL, NULL, ?, ?, ?, 'recording', ?)`,
     ).run(
       record.id,
       record.game,
+      record.title ?? null,
       record.filePath,
       record.startedAt,
       record.resolution ?? null,
@@ -459,6 +481,7 @@ function mapRecording(row: Record<string, unknown>): RecordingRecord {
   return {
     id: String(row.id),
     game: String(row.game) as GameKey,
+    title: row.title ? String(row.title) : null,
     filePath: String(row.file_path),
     thumbnailPath: row.thumbnail_path ? String(row.thumbnail_path) : null,
     startedAt: Number(row.started_at),
