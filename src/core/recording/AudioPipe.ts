@@ -7,10 +7,13 @@ const log = createLogger('Recording');
 
 const PIPE_PREFIX = '\\\\.\\pipe\\';
 
-/** Si no llega audio durante este tiempo, se rellena con silencio. */
-const GAP_TOLERANCE_MS = 300;
-/** Cada cuanto se vigila que el flujo siga llegando. */
-const WATCHDOG_MS = 200;
+/**
+ * Cada cuanto se entrega audio a FFmpeg.
+ *
+ * Corto a proposito: FFmpeg avanza al ritmo de su entrada mas lenta, asi que
+ * cualquier retraso aqui se convierte en imagen perdida.
+ */
+const PUMP_INTERVAL_MS = 100;
 /**
  * Tope de lo que se guarda esperando a que FFmpeg conecte.
  *
@@ -20,6 +23,11 @@ const WATCHDOG_MS = 200;
  */
 const MAX_PENDING_BYTES = Math.round(AUDIO_BYTES_PER_SECOND * 1.5);
 
+/** Redondea a muestra completa: media muestra intercambiaria los canales. */
+function align(bytes: number): number {
+  return Math.max(0, bytes - (bytes % 4));
+}
+
 /**
  * Tuberia con nombre por la que se le pasa el audio a FFmpeg.
  *
@@ -27,12 +35,25 @@ const MAX_PENDING_BYTES = Math.round(AUDIO_BYTES_PER_SECOND * 1.5);
  * que el audio no puede entrar por `-f dshow` como el video entra por ddagrab.
  * Se captura por otro lado y se entrega aqui ya mezclado y en crudo.
  *
- * Lo importante es que el audio nunca frene al video. Si quien produce el
- * sonido se atasca, la tuberia rellena el hueco con silencio en lugar de
- * dejar a FFmpeg esperando: se pierde un instante de sonido, que es mucho
- * mejor que perder la grabacion entera. Y el relleno mantiene la
- * correspondencia entre segundos de audio y segundos de video, que es lo que
- * evita que el sonido se vaya desplazando respecto a la imagen.
+ * ## Por que esto entrega a reloj y no segun llega
+ *
+ * FFmpeg avanza al ritmo de su entrada mas lenta. Si el audio llega tarde, no
+ * se retrasa solo el sonido: se frena la captura entera y el video pierde
+ * fotogramas. Medido en esta maquina, con el audio llegando al 77% del tiempo
+ * real, cuarenta y cinco segundos de partida dejaron treinta y cinco de video.
+ * Le paso a una partida de League of Legends de verdad: dos mil doscientos
+ * sesenta y nueve segundos jugados, mil setecientos treinta grabados, y una
+ * cuarta parte de la partida perdida.
+ *
+ * Y llega tarde con facilidad, porque quien captura el sonido es la ventana, y
+ * la ventana suele estar escondida en la bandeja mientras se juega: Chromium
+ * frena lo que no se ve.
+ *
+ * Por eso la tuberia no reenvia lo que le dan cuando se lo dan. Lleva su
+ * propio reloj y entrega exactamente los bytes que corresponden al tiempo
+ * transcurrido: si el productor va corto, completa con silencio; si va
+ * sobrado, se queda esperando. FFmpeg nunca espera por el audio, y un segundo
+ * de grabacion ocupa siempre un segundo de pista.
  */
 export class AudioPipe {
   readonly path: string;
@@ -40,10 +61,13 @@ export class AudioPipe {
   private socket: Socket | null = null;
   private pending: Buffer[] = [];
   private pendingBytes = 0;
-  private watchdog: NodeJS.Timeout | null = null;
-  private lastChunkAt = 0;
+  private pump: NodeJS.Timeout | null = null;
   private closed = false;
   private silencePadded = 0;
+  /** Instante en que FFmpeg empezo a leer. Origen del reloj de la pista. */
+  private startedAt = 0;
+  /** Bytes ya entregados. Comparado con el reloj, dice si vamos cortos. */
+  private written = 0;
 
   constructor(id = randomBytes(6).toString('hex')) {
     this.path = PIPE_PREFIX + 'clipper-audio-' + id;
@@ -55,6 +79,11 @@ export class AudioPipe {
       const server = createServer((socket) => {
         log.info('FFmpeg ha conectado con la tuberia de audio');
         this.socket = socket;
+        // El reloj de la pista empieza cuando FFmpeg empieza a leer, no cuando
+        // la tuberia se pone a escuchar: entre las dos cosas puede pasar un
+        // segundo largo de arranque que no forma parte del video.
+        this.startedAt = Date.now();
+        this.written = 0;
         socket.on('error', () => {
           // FFmpeg cierra su extremo al terminar; no es un fallo.
           this.socket = null;
@@ -62,34 +91,32 @@ export class AudioPipe {
         socket.on('close', () => {
           this.socket = null;
         });
-        this.flushPending();
       });
 
       server.on('error', (err) => reject(err));
       server.listen(this.path, () => {
         this.server = server;
-        this.lastChunkAt = Date.now();
-        this.watchdog = setInterval(() => this.fillGap(), WATCHDOG_MS);
+        this.pump = setInterval(() => this.deliver(), PUMP_INTERVAL_MS);
         resolve();
       });
     });
   }
 
-  /** Entrega un trozo de audio en crudo (PCM 16 bits, 48 kHz, estereo). */
+  /**
+   * Encola un trozo de audio en crudo (PCM 16 bits, 48 kHz, estereo).
+   *
+   * No se manda en el acto: lo entrega el reloj. Aqui solo se guarda, y se
+   * descarta lo mas viejo si nadie lo consume, para que un productor
+   * desbocado o un FFmpeg que nunca conecta no se coman la memoria.
+   */
   write(chunk: Buffer): void {
     if (this.closed) return;
-    this.lastChunkAt = Date.now();
-
-    if (!this.socket) {
-      this.pending.push(chunk);
-      this.pendingBytes += chunk.length;
-      while (this.pendingBytes > MAX_PENDING_BYTES && this.pending.length > 1) {
-        const dropped = this.pending.shift();
-        this.pendingBytes -= dropped ? dropped.length : 0;
-      }
-      return;
+    this.pending.push(chunk);
+    this.pendingBytes += chunk.length;
+    while (this.pendingBytes > MAX_PENDING_BYTES && this.pending.length > 1) {
+      const dropped = this.pending.shift();
+      this.pendingBytes -= dropped ? dropped.length : 0;
     }
-    this.socket.write(chunk);
   }
 
   /** Silencio escrito para tapar huecos, en milisegundos. Para diagnostico. */
@@ -97,41 +124,58 @@ export class AudioPipe {
     return Math.round((this.silencePadded / AUDIO_BYTES_PER_SECOND) * 1000);
   }
 
-  private flushPending(): void {
-    if (!this.socket) return;
-    for (const chunk of this.pending) this.socket.write(chunk);
-    this.pending = [];
-    this.pendingBytes = 0;
+  /**
+   * Entrega el audio que corresponde al tiempo transcurrido.
+   *
+   * Se calcula cuantos bytes deberian haberse escrito ya y se completa la
+   * diferencia: primero con lo que haya encolado y, si no llega, con silencio.
+   * Nunca se escribe de mas, porque la pista quedaria mas larga que el video.
+   */
+  private deliver(): void {
+    if (this.closed || !this.socket) return;
+
+    const elapsedMs = Date.now() - this.startedAt;
+    const target = align(Math.round((elapsedMs / 1000) * AUDIO_BYTES_PER_SECOND));
+    let missing = target - this.written;
+    if (missing <= 0) return;
+
+    while (missing > 0 && this.pending.length > 0) {
+      const head = this.pending[0];
+      if (head.length <= missing) {
+        this.send(head);
+        this.pending.shift();
+        this.pendingBytes -= head.length;
+        missing -= head.length;
+      } else {
+        const part = head.subarray(0, align(missing));
+        if (part.length === 0) break;
+        this.pending[0] = head.subarray(part.length);
+        this.pendingBytes -= part.length;
+        this.send(part);
+        missing -= part.length;
+      }
+    }
+
+    // Lo que falte va en silencio. Es la pieza que impide que un productor
+    // lento arrastre a la captura entera.
+    const pad = align(missing);
+    if (pad > 0) {
+      this.send(Buffer.alloc(pad));
+      this.silencePadded += pad;
+    }
   }
 
-  /**
-   * Tapa con silencio el tiempo que lleva sin llegar audio.
-   *
-   * Sin esto, un paron de dos segundos no dejaria dos segundos de silencio:
-   * dejaria el resto del sonido adelantado dos segundos respecto a la imagen,
-   * y el desfase se arrastraria hasta el final de la partida.
-   */
-  private fillGap(): void {
-    if (this.closed || !this.socket) return;
-    const gap = Date.now() - this.lastChunkAt;
-    if (gap < GAP_TOLERANCE_MS) return;
-
-    const bytes = Math.round((gap / 1000) * AUDIO_BYTES_PER_SECOND);
-    // Alineado a muestra completa: media muestra desplazaria los canales.
-    const aligned = bytes - (bytes % 4);
-    if (aligned <= 0) return;
-
-    this.socket.write(Buffer.alloc(aligned));
-    this.silencePadded += aligned;
-    this.lastChunkAt = Date.now();
+  private send(chunk: Buffer): void {
+    this.socket?.write(chunk);
+    this.written += chunk.length;
   }
 
   /** Cierra la tuberia. FFmpeg vera el fin de la entrada y cerrara su pista. */
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    if (this.watchdog) clearInterval(this.watchdog);
-    this.watchdog = null;
+    if (this.pump) clearInterval(this.pump);
+    this.pump = null;
     this.pending = [];
 
     if (this.socket) {

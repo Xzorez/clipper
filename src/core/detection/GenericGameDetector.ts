@@ -45,7 +45,11 @@ export const GAME_LIBRARY_MARKERS = [
   '/epic games/',
   '/gog galaxy/games/',
   '/gog games/',
-  '/riot games/',
+  // Riot Games no esta: los tres juegos que viven ahi tienen adaptador propio
+  // y deteccion propia. Dejarlo hacia que el cliente de League of Legends
+  // pasara por juego, y la aplicacion se ponia a grabar los menus durante la
+  // seleccion de campeon; cuando empezaba la partida de verdad, ya estaba
+  // grabando otra cosa.
   '/ubisoft game launcher/',
   '/ubisoft/',
   '/origin games/',
@@ -79,9 +83,15 @@ export const NOT_GAMES = [
   'eadesktop',
   'eabackgroundservice',
   'origin',
+  'riot client',
   'riotclientservices',
+  'riotclientcrashhandler',
   'riotclientux',
   'riotclientuxrender',
+  'leagueclient',
+  'leagueclientux',
+  'leagueclientuxrender',
+  'leaguecrashhandler64',
   'rockstarservice',
   'launcher',
   'crashhandler',

@@ -7,11 +7,11 @@ import { AUDIO_BYTES_PER_SECOND } from '../src/core/recording/captureArgs';
 /**
  * La tuberia por la que FFmpeg recibe el audio.
  *
- * Lo que se prueba aqui no es que "funcione", sino que no arrastre a la
- * grabacion cuando algo va mal: si el productor de sonido se para, FFmpeg no
- * puede quedarse esperando, y el hueco tiene que ocupar en la pista el mismo
- * tiempo que ocupo en la realidad. Si no, el sonido se adelanta y ya no vuelve
- * a cuadrar con la imagen.
+ * Lo que se prueba aqui no es que llegue el sonido, sino que llegue *a
+ * tiempo*. FFmpeg avanza al ritmo de su entrada mas lenta: si el audio se
+ * retrasa, no se retrasa solo el audio, se frena la captura entera y el video
+ * pierde imagen. Paso de verdad en una partida de League of Legends, con una
+ * cuarta parte de la partida perdida.
  */
 describe('AudioPipe', () => {
   const abiertos: Array<{ pipe: AudioPipe; socket: Socket | null }> = [];
@@ -37,26 +37,60 @@ describe('AudioPipe', () => {
     });
 
     abiertos.push({ pipe, socket });
-    // Un respiro para que el servidor registre la conexion.
     await new Promise((r) => setTimeout(r, 30));
     return { pipe, recibido: () => Buffer.concat(trozos) };
   }
 
-  it('entrega intacto lo que se le escribe', async () => {
+  /** Cuantos bytes de audio corresponden a un tiempo dado. */
+  const bytesDe = (segundos: number) => segundos * AUDIO_BYTES_PER_SECOND;
+
+  it('entrega a tiempo real aunque el productor vaya lento', async () => {
+    // Esta es la prueba del fallo: antes se reenviaba lo que llegaba cuando
+    // llegaba, asi que un productor al 60% dejaba a FFmpeg esperando y la
+    // captura se comprimia. Ahora el hueco se rellena y el reloj se respeta.
     const { pipe, recibido } = await abrir();
-    const datos = randomBytes(800);
-    pipe.write(datos);
-    await new Promise((r) => setTimeout(r, 80));
-    expect(recibido().equals(datos)).toBe(true);
+
+    const lento = setInterval(() => pipe.write(Buffer.alloc(bytesDe(0.06))), 100);
+    await new Promise((r) => setTimeout(r, 900));
+    clearInterval(lento);
+
+    const entregado = recibido().length;
+    // Con margen para la imprecision de los temporizadores, pero muy por
+    // encima del 60% que entregaba el productor.
+    expect(entregado).toBeGreaterThan(bytesDe(0.7));
+    expect(pipe.paddedSilenceMs).toBeGreaterThan(100);
+  });
+
+  it('no entrega mas rapido que el tiempo real', async () => {
+    // Escribir de mas dejaria la pista de audio mas larga que el video, y el
+    // sonido se iria adelantando respecto a la imagen.
+    const { pipe, recibido } = await abrir();
+
+    // Diez segundos de audio de golpe, para medio segundo de reloj.
+    for (let i = 0; i < 10; i++) pipe.write(Buffer.alloc(bytesDe(1)));
+    await new Promise((r) => setTimeout(r, 500));
+
+    expect(recibido().length).toBeLessThan(bytesDe(1));
+  });
+
+  it('conserva el contenido cuando el productor va al ritmo', async () => {
+    const { pipe, recibido } = await abrir();
+
+    const marca = randomBytes(bytesDe(0.05));
+    pipe.write(marca);
+    await new Promise((r) => setTimeout(r, 400));
+
+    // Lo entregado empieza por lo que se escribio, sin reordenar ni perder.
+    expect(recibido().subarray(0, marca.length).equals(marca)).toBe(true);
   });
 
   it('guarda lo que llega antes de que FFmpeg conecte', async () => {
     const pipe = new AudioPipe('test-' + randomBytes(4).toString('hex'));
     await pipe.start();
-    const datos = randomBytes(400);
     // Audio producido antes de que nadie escuche: no puede perderse, o el
     // principio de la grabacion saldria mudo.
-    pipe.write(datos);
+    const marca = randomBytes(bytesDe(0.05));
+    pipe.write(marca);
 
     const trozos: Buffer[] = [];
     const socket = await new Promise<Socket>((resolve, reject) => {
@@ -66,28 +100,21 @@ describe('AudioPipe', () => {
     });
     abiertos.push({ pipe, socket });
 
-    await new Promise((r) => setTimeout(r, 100));
-    expect(Buffer.concat(trozos).equals(datos)).toBe(true);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(Buffer.concat(trozos).subarray(0, marca.length).equals(marca)).toBe(true);
   });
 
   it('rellena con silencio cuando el sonido deja de llegar', async () => {
     const { pipe, recibido } = await abrir();
-    pipe.write(randomBytes(100));
-
-    // Medio segundo sin producir nada: por encima de la tolerancia.
     await new Promise((r) => setTimeout(r, 600));
 
-    const total = recibido().length;
-    expect(pipe.paddedSilenceMs).toBeGreaterThan(200);
-    // El relleno debe corresponderse con el tiempo transcurrido, que es lo que
-    // mantiene el audio cuadrado con el video.
-    const esperado = (pipe.paddedSilenceMs / 1000) * AUDIO_BYTES_PER_SECOND;
-    expect(total - 100).toBeGreaterThan(esperado * 0.8);
+    expect(pipe.paddedSilenceMs).toBeGreaterThan(300);
+    expect(recibido().length).toBeGreaterThan(bytesDe(0.4));
   });
 
-  it('escribe el silencio alineado a muestras completas', async () => {
+  it('escribe siempre muestras completas', async () => {
     const { pipe, recibido } = await abrir();
-    await new Promise((r) => setTimeout(r, 600));
+    await new Promise((r) => setTimeout(r, 400));
     // Estereo de 16 bits: 4 bytes por muestra. Media muestra intercambiaria
     // los canales a partir de ahi.
     expect(recibido().length % 4).toBe(0);
@@ -100,7 +127,7 @@ describe('AudioPipe', () => {
 
     // Diez segundos de audio sin lector: se descarta lo viejo en lugar de
     // acumularlo durante toda la partida.
-    for (let i = 0; i < 100; i++) pipe.write(Buffer.alloc(AUDIO_BYTES_PER_SECOND / 10));
+    for (let i = 0; i < 100; i++) pipe.write(Buffer.alloc(bytesDe(0.1)));
 
     const trozos: Buffer[] = [];
     const socket = await new Promise<Socket>((resolve, reject) => {
@@ -109,8 +136,8 @@ describe('AudioPipe', () => {
       s.on('data', (d) => trozos.push(d));
     });
     abiertos[abiertos.length - 1].socket = socket;
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 300));
 
-    expect(Buffer.concat(trozos).length).toBeLessThan(AUDIO_BYTES_PER_SECOND * 2);
+    expect(Buffer.concat(trozos).length).toBeLessThan(bytesDe(2));
   });
 });

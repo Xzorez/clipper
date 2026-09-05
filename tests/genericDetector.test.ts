@@ -137,6 +137,31 @@ describe('deteccion de otros juegos', () => {
       expect(elegido?.processName).toBe('Machine Party.exe');
     });
 
+    it('no toma por juego el cliente de Riot ni el de League of Legends', () => {
+      // Caso real: el detector se quedo con "Riot Client" durante la seleccion
+      // de campeon y grabo trece minutos de menus. Cuando empezaba la partida
+      // de verdad ya estaba grabando otra cosa. Los tres juegos que viven en
+      // Riot Games tienen adaptador propio; ahi no pinta nada este detector.
+      const lanzadores = [
+        win({
+          Id: 1,
+          ProcessName: 'Riot Client',
+          Path: String.raw`C:\Riot Games\Riot Client\Riot Client.exe`,
+        }),
+        win({
+          Id: 2,
+          ProcessName: 'LeagueClientUx',
+          MainWindowTitle: 'League of Legends',
+          Path: String.raw`C:\Riot Games\League of Legends\LeagueClientUx.exe`,
+        }),
+      ];
+      expect(pickGame(lanzadores, [], () => [])).toBeNull();
+
+      // Y la carpeta de Riot ya no cuenta como biblioteca de juegos: aunque el
+      // ejecutable tuviera otro nombre, no colaria por estar ahi.
+      expect(isGamePath(String.raw`C:\Riot Games\League of Legends\otro.exe`)).toBe(false);
+    });
+
     it('se aparta cuando corre un juego con adaptador propio', () => {
       // VALORANT tiene su propia deteccion y sus eventos. Tratarlo como
       // generico cambiaria marcadores automaticos por ninguno.
