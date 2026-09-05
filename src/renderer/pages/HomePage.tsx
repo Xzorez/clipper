@@ -53,10 +53,38 @@ export function HomePage({
   const recording = status?.state === DetectionState.RECORDING;
   const recordingId = status?.recordingId ?? null;
 
-  // Los momentos de la partida en curso llegan segun ocurren; al empezar otra
-  // se vacian, para no arrastrar los de la anterior.
-  useEffect(() => setLive([]), [recordingId]);
-  useEffect(() => api.onEvent((event) => setLive((prev) => [...prev, event])), []);
+  /**
+   * Momentos de la partida en curso.
+   *
+   * Se piden los que ya hay antes de escuchar los siguientes. Escuchar a secas
+   * no basta: la ventana suele estar escondida en la bandeja mientras se
+   * juega, asi que al abrirla a mitad de partida el panel saldria vacio aunque
+   * llevaras veinte kills, y solo se llenaria a partir de la siguiente.
+   */
+  useEffect(() => {
+    setLive([]);
+    if (!recordingId) return;
+    let cancelled = false;
+    void api
+      .getEvents(recordingId)
+      .then((previous) => {
+        if (!cancelled) setLive(previous);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [recordingId]);
+
+  useEffect(
+    () =>
+      api.onEvent((event) =>
+        // Puede llegar un evento mientras se resuelve la peticion anterior:
+        // se descarta si ya esta, en vez de duplicar el marcador.
+        setLive((prev) => (prev.some((e) => e.id === event.id) ? prev : [...prev, event])),
+      ),
+    [],
+  );
 
   const filtered = useMemo(
     () => (filter === 'all' ? recent : recent.filter((r) => r.game === filter)),
