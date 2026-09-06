@@ -66,6 +66,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
   const [current, setCurrent] = useState(0);
 
   useImperativeHandle(ref, () => ({
@@ -217,18 +218,40 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
           ))}
         </div>
 
-        <button
-          className="ctl"
-          title={muted ? 'Activar sonido' : 'Silenciar'}
-          onClick={() => {
-            const video = videoRef.current;
-            if (!video) return;
-            video.muted = !video.muted;
-            setMuted(video.muted);
-          }}
-        >
-          {muted ? <IconMute size={15} /> : <IconVolume size={15} />}
-        </button>
+        <div className="vol">
+          <button
+            className="ctl"
+            title={muted ? 'Activar sonido' : 'Silenciar'}
+            onClick={() => {
+              const video = videoRef.current;
+              if (!video) return;
+              video.muted = !video.muted;
+              setMuted(video.muted);
+            }}
+          >
+            {muted || volume === 0 ? <IconMute size={15} /> : <IconVolume size={15} />}
+          </button>
+          <input
+            className="vol__bar"
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={muted ? 0 : volume}
+            title="Volumen"
+            onChange={(e) => {
+              const value = Number(e.target.value);
+              const video = videoRef.current;
+              setVolume(value);
+              if (!video) return;
+              video.volume = value;
+              // Mover la barra desde cero vuelve a activar el sonido: tener que
+              // pulsar ademas el altavoz seria un paso de mas.
+              video.muted = value === 0;
+              setMuted(video.muted);
+            }}
+          />
+        </div>
         <button
           className="ctl"
           title="Pantalla completa (F, o doble clic en el video)"

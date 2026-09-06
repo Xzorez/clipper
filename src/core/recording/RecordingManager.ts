@@ -18,6 +18,7 @@ import { DiskSpaceGuard } from './DiskSpaceGuard';
 import { SidecarStore } from './SidecarStore';
 import { ThumbnailService } from '../services/ThumbnailService';
 import { HighlightService } from '../services/HighlightService';
+import { cleanLeftovers, optimizeForPlayback } from './Optimizer';
 import { createLogger } from '../logging/Logger';
 
 const log = createLogger('Recording');
@@ -277,6 +278,9 @@ export class RecordingManager extends EventEmitter {
 
     try {
       mkdirSync(folder, { recursive: true });
+      // Restos de un reordenado interrumpido por un cierre a destiempo: si no
+      // se limpian, un duplicado de varios gigas se queda ahi para siempre.
+      cleanLeftovers(folder);
     } catch (err) {
       this.fail(
         'No se ha podido crear la carpeta de grabaciones',
@@ -540,9 +544,9 @@ export class RecordingManager extends EventEmitter {
       log.error(`No se pudo finalizar la grabacion en la base de datos: ${(err as Error).message}`);
     }
 
-    // Miniatura: si falla, la biblioteca muestra un marcador de posicion.
+    // Reordenar y miniatura: si fallan, la partida sigue estando entera.
     if (fileExists) {
-      void this.generateThumbnail(active.id, filePath, durationSec, events);
+      void this.finishInBackground(active.id, filePath, durationSec, events);
       // Los destacados van despues y por su cuenta: la partida ya esta
       // guardada y esto es un extra que puede tardar. Nadie espera por el.
       if (this.settingsForHighlights?.audioHighlights) {
@@ -632,6 +636,27 @@ export class RecordingManager extends EventEmitter {
     } catch (err) {
       log.warn(`No se pudieron deducir destacados: ${(err as Error).message}`);
     }
+  }
+
+  /**
+   * Lo que queda por hacer con la partida ya guardada.
+   *
+   * Va en segundo plano y en este orden: primero se reordena el fichero, que
+   * es lo que hace que se abra al instante, y despues se saca la miniatura del
+   * fichero ya reordenado, que ademas es mas rapido. Nadie espera por esto.
+   */
+  private async finishInBackground(
+    recordingId: string,
+    filePath: string,
+    durationSec: number,
+    events: GameEvent[],
+  ): Promise<void> {
+    try {
+      if (await optimizeForPlayback(filePath)) this.emit('events-added', { recordingId, count: 0 });
+    } catch (err) {
+      log.warn(`No se ha podido reordenar la grabacion: ${(err as Error).message}`);
+    }
+    await this.generateThumbnail(recordingId, filePath, durationSec, events);
   }
 
   private async generateThumbnail(

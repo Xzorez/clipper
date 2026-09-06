@@ -1033,6 +1033,7 @@ button {
 }
 
 .player__main {
+  position: relative;
   flex: 1;
   min-width: 0;
   padding: 20px;
@@ -1061,13 +1062,49 @@ button {
 }
 
 /*
- * En pantalla completa se lleva la vista entera, no solo el video: asi siguen
- * a mano los controles y la linea temporal, que es lo que se usa mientras se
- * repasa una jugada.
+ * Pantalla completa: el video se lo queda todo.
+ *
+ * Se lleva la vista entera y no solo el elemento de video, para conservar los
+ * controles y poder salir sin perder el sitio. Pero el editor de clip y la
+ * linea temporal se esconden: con la ventana ya maximizada y sin marco,
+ * dejarlos puestos hacia que entrar en pantalla completa no se notara: se
+ * ganaba la barra de tareas y nada mas, y el video seguia igual de pequeno.
  */
 .player:fullscreen {
-  background: var(--bg);
+  background: #000;
   padding: 0;
+}
+
+.player:fullscreen .aside,
+.player:fullscreen .lanes {
+  display: none;
+}
+
+.player:fullscreen .player__main {
+  padding: 0;
+  gap: 0;
+}
+
+.player:fullscreen .player__video {
+  border: 0;
+  border-radius: 0;
+}
+
+/* Los controles se superponen abajo en vez de robarle sitio a la imagen. */
+.player:fullscreen .controls {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 14px 20px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.85), transparent);
+  opacity: 0;
+  transition: opacity 0.15s var(--ease);
+}
+
+.player:fullscreen:hover .controls,
+.player:fullscreen .controls:focus-within {
+  opacity: 1;
 }
 
 .controls {
@@ -1849,4 +1886,41 @@ input.cap {
 
 .upd__btn:hover {
   background: var(--accent-hi);
+}
+
+/* --- Volumen --------------------------------------------------------------
+   Barra fina al lado del altavoz. Con silenciar a secas no habia forma de
+   bajar el sonido de una partida grabada alta sin tocar el del sistema.
+------------------------------------------------------------------------- */
+
+.vol {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vol__bar {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 72px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-2);
+  cursor: pointer;
+  outline: none;
+}
+
+.vol__bar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--text);
+  cursor: pointer;
+  transition: background 0.12s var(--ease);
+}
+
+.vol__bar:hover::-webkit-slider-thumb {
+  background: var(--accent);
 }
