@@ -397,8 +397,13 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
       },
       this.currentFilePath,
     );
+    // Cuando se graba la ventana del juego, la imagen entra por la tuberia y el
+    // candidato de pantalla solo queda como respaldo. Nombrarlo aqui hacia que
+    // el registro dijese "captura del monitor 1" en grabaciones que en realidad
+    // eran de la ventana, que es justo el dato que uno viene a mirar.
+    const fuente = context.videoPipe ? 'ventana del juego' : describeCandidate(candidate);
     log.info(
-      `Lanzando FFmpeg (${describeCandidate(candidate)}) con ${context.encoder} a ` +
+      `Lanzando FFmpeg (${fuente}) con ${context.encoder} a ` +
         `${context.width}x${context.height}@${request.settings.fps}`,
     );
 
