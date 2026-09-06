@@ -222,6 +222,7 @@ export function App() {
           {route.name === 'player' && (
             <PlayerPage
               recordingId={route.recordingId}
+              initial={recordings.find((r) => r.id === route.recordingId) ?? null}
               settings={settings}
               onBack={() => go('library')}
               onNotify={notify}

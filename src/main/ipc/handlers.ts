@@ -22,8 +22,14 @@ type WindowGetter = () => BrowserWindow | null;
 export function registerIpcHandlers(context: AppContext, getWindow: WindowGetter): void {
   const handle = <T>(channel: string, fn: (...args: never[]) => Promise<T> | T): void => {
     ipcMain.handle(channel, async (_event, ...args) => {
+      const startedAt = Date.now();
       try {
         const data = await fn(...(args as never[]));
+        // Una consulta de la interfaz que tarda medio segundo se nota al
+        // pulsar. Dejarlo anotado evita tener que adivinar despues cual de
+        // todas era la lenta.
+        const elapsed = Date.now() - startedAt;
+        if (elapsed > 500) log.warn(`IPC ${channel} tardo ${elapsed}ms`);
         return { ok: true, data };
       } catch (err) {
         const message = (err as Error).message ?? String(err);

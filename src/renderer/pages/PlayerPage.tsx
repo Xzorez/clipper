@@ -26,6 +26,14 @@ export interface PlayerHeader {
 
 export interface PlayerPageProps {
   recordingId: string;
+  /**
+   * La grabacion tal como la conoce la biblioteca.
+   *
+   * Se pasa ya hecha porque la lista la tiene en memoria desde antes de
+   * pulsar: esperar a preguntarla otra vez solo retrasa el momento en que el
+   * video empieza a cargar, que es lo unico que de verdad tarda.
+   */
+  initial?: RecordingRecord | null;
   settings: AppSettings | null;
   onBack: () => void;
   onNotify: (title: string, message: string) => void;
@@ -42,6 +50,7 @@ export interface PlayerPageProps {
  */
 export function PlayerPage({
   recordingId,
+  initial,
   settings,
   onBack,
   onNotify,
@@ -49,12 +58,13 @@ export function PlayerPage({
   onHeader,
 }: PlayerPageProps) {
   const playerRef = useRef<VideoPlayerHandle>(null);
-  const [recording, setRecording] = useState<RecordingRecord | null>(null);
+  const viewRef = useRef<HTMLDivElement>(null);
+  const [recording, setRecording] = useState<RecordingRecord | null>(initial ?? null);
   const [events, setEvents] = useState<GameEvent[]>([]);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState(initial?.duration ?? 0);
   const [currentTime, setCurrentTime] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initial);
   const [busy, setBusy] = useState(false);
   const [aspect, setAspect] = useState<ClipAspect>('original');
   const [draft, setDraft] = useState<ClipDraft>({ start: 0, end: 15 });
@@ -62,9 +72,10 @@ export function PlayerPage({
     () => new Set(DEFAULT_VISIBLE_TYPES),
   );
 
+  // Los momentos y los datos frescos llegan por su cuenta: la pantalla ya se
+  // ha pintado y el video ya esta cargando mientras tanto.
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     setError(null);
 
     void (async () => {
@@ -74,14 +85,14 @@ export function PlayerPage({
           api.getEvents(recordingId),
         ]);
         if (cancelled) return;
-        setRecording(rec);
+        if (rec) setRecording(rec);
         setEvents(evts);
         if (rec?.duration) {
           setDuration(rec.duration);
           setDraft({ start: 0, end: Math.min(15, rec.duration) });
         }
       } catch (err) {
-        if (!cancelled) setError((err as Error).message);
+        if (!cancelled && !initial) setError((err as Error).message);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -90,7 +101,7 @@ export function PlayerPage({
     return () => {
       cancelled = true;
     };
-  }, [recordingId]);
+  }, [recordingId, initial]);
 
   const seek = useCallback(
     (seconds: number, play = false) => {
@@ -178,7 +189,7 @@ export function PlayerPage({
   }
 
   return (
-    <div className="player">
+    <div className="player" ref={viewRef}>
       <div className="player__top">
         <div className="player__main">
           {/* Una partida recuperada tras un cierre inesperado no es una partida
@@ -205,6 +216,7 @@ export function PlayerPage({
               ref={playerRef}
               src={api.mediaUrl(recording.filePath)}
               duration={duration}
+              fullscreenTarget={viewRef}
               onTimeUpdate={setCurrentTime}
               onDurationChange={(d) => d > 0 && setDuration(d)}
               onError={setError}

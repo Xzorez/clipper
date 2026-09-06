@@ -8,8 +8,14 @@ import {
   IconFullscreen,
 } from './Icons';
 
-/** Velocidades del segmentado. Tres bastan; el resto era relleno. */
-const SPEEDS = [0.5, 1, 2] as const;
+/**
+ * Velocidades del segmentado.
+ *
+ * Las muy lentas estan para lo que se viene a hacer aqui: mirar fotograma a
+ * fotograma que paso justo en el momento de una muerte. A 0,1x un segundo de
+ * partida dura diez.
+ */
+const SPEEDS = [0.1, 0.25, 0.5, 1, 2] as const;
 /** Salto de los botones de retroceso y avance, en segundos. */
 const STEP = 5;
 
@@ -22,6 +28,15 @@ export interface VideoPlayerHandle {
 export interface VideoPlayerProps {
   src: string;
   duration: number;
+  /**
+   * Que se pone en pantalla completa.
+   *
+   * Se prefiere la vista entera y no solo el video: asi se conservan los
+   * controles y la linea temporal, que es justo lo que se usa mientras se
+   * repasa una jugada. Poner solo el video obligaria a salir para saltar al
+   * momento siguiente.
+   */
+  fullscreenTarget?: React.RefObject<HTMLElement>;
   onTimeUpdate: (seconds: number) => void;
   onDurationChange: (seconds: number) => void;
   onError: (message: string) => void;
@@ -43,7 +58,7 @@ export interface VideoPlayerProps {
  * hacia que todo pesara igual.
  */
 export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(function VideoPlayer(
-  { src, duration, onTimeUpdate, onDurationChange, onError },
+  { src, duration, fullscreenTarget, onTimeUpdate, onDurationChange, onError },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -111,6 +126,46 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     if (videoRef.current) videoRef.current.playbackRate = value;
   }, []);
 
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+      return;
+    }
+    const target = fullscreenTarget?.current ?? videoRef.current;
+    void target?.requestFullscreen().catch(() => undefined);
+  }, [fullscreenTarget]);
+
+  // Teclas de toda la vida en un reproductor. Se escuchan en la ventana entera
+  // porque el foco casi nunca esta en el video: se llega aqui pulsando un
+  // momento de la linea temporal.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+
+      switch (event.key) {
+        case ' ':
+          event.preventDefault();
+          toggle();
+          break;
+        case 'f':
+        case 'F':
+          toggleFullscreen();
+          break;
+        case 'ArrowLeft':
+          step(-STEP);
+          break;
+        case 'ArrowRight':
+          step(STEP);
+          break;
+        default:
+          break;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggle, step, toggleFullscreen]);
+
   return (
     <>
       <div className="player__video">
@@ -128,6 +183,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
             )
           }
           onClick={toggle}
+          onDoubleClick={toggleFullscreen}
         />
       </div>
 
@@ -175,8 +231,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
         </button>
         <button
           className="ctl"
-          title="Pantalla completa"
-          onClick={() => void videoRef.current?.requestFullscreen().catch(() => undefined)}
+          title="Pantalla completa (F, o doble clic en el video)"
+          onClick={toggleFullscreen}
         >
           <IconFullscreen size={15} />
         </button>

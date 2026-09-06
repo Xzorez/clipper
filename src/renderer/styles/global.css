@@ -871,6 +871,12 @@ button {
 }
 
 .rec {
+  /*
+   * Un <button> se encoge a su contenido aunque sea hijo de una rejilla: los
+   * controles de formulario no se estiran como un div. Sin esto, las tarjetas
+   * salian estrechas y el mosaico dejaba media pantalla vacia.
+   */
+  width: 100%;
   border: 1px solid var(--border);
   border-radius: var(--r-3);
   overflow: hidden;
@@ -1054,11 +1060,27 @@ button {
   display: block;
 }
 
+/*
+ * En pantalla completa se lleva la vista entera, no solo el video: asi siguen
+ * a mano los controles y la linea temporal, que es lo que se usa mientras se
+ * repasa una jugada.
+ */
+.player:fullscreen {
+  background: var(--bg);
+  padding: 0;
+}
+
 .controls {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   flex-wrap: wrap;
+}
+
+/* Con cinco velocidades la fila se queda justa: se aprieta el segmentado antes
+   que dejar el volumen y la pantalla completa fuera de la vista. */
+.seg button {
+  padding: 8px 9px;
 }
 
 .ctl {
