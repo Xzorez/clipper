@@ -132,12 +132,21 @@ export function registerIpcHandlers(context: AppContext, getWindow: WindowGetter
     if (!recording) throw new Error('No se ha encontrado la grabacion.');
 
     if (deleteFile) {
-      for (const path of [recording.filePath, SidecarStore.pathFor(recording.filePath)]) {
-        try {
-          if (existsSync(path)) unlinkSync(path);
-        } catch (err) {
-          log.warn(`No se pudo borrar ${path}: ${(err as Error).message}`);
-        }
+      const stuck = removeFiles([
+        recording.filePath,
+        SidecarStore.pathFor(recording.filePath),
+      ]);
+
+      // Si el video no se ha podido borrar, la partida NO sale de la
+      // biblioteca. Quitarla igualmente dejaba un fichero de un giga ocupando
+      // disco sin que nadie supiera que estaba ahi, y encima diciendo que se
+      // habia borrado.
+      if (stuck) {
+        throw new Error(
+          'El video esta en uso y no se ha podido borrar. Suele pasar si acabas de ' +
+            'verlo o si la grabacion todavia se esta cerrando: espera unos segundos e ' +
+            'intentalo otra vez.',
+        );
       }
     }
 
@@ -232,4 +241,37 @@ function isElevated(): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Borra ficheros reintentando un par de veces.
+ *
+ * Windows mantiene el fichero bloqueado un instante despues de que alguien
+ * deje de usarlo, y el reproductor acaba de tenerlo abierto si se venia de
+ * verlo. Un reintento corto convierte la mayoria de esos fallos en un borrado
+ * normal. Devuelve la ruta que no se ha podido borrar, o null.
+ */
+function removeFiles(paths: string[]): string | null {
+  for (const path of paths) {
+    if (!existsSync(path)) continue;
+    let removed = false;
+    for (let attempt = 0; attempt < 3 && !removed; attempt++) {
+      try {
+        unlinkSync(path);
+        removed = true;
+      } catch (err) {
+        if (attempt === 2) {
+          log.warn(`No se pudo borrar ${path}: ${(err as Error).message}`);
+          return path;
+        }
+        // Espera activa y muy corta: son milisegundos y ocurre al pulsar
+        // borrar, no en mitad de una grabacion.
+        const until = Date.now() + 200;
+        while (Date.now() < until) {
+          /* esperando a que Windows suelte el fichero */
+        }
+      }
+    }
+  }
+  return null;
 }
