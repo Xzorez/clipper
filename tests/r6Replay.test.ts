@@ -392,6 +392,43 @@ describe('R6ReplayProvider', () => {
     rmSync(empty, { recursive: true, force: true });
   });
 
+  it('empieza a leer cuando la carpeta aparece a mitad de sesion', async () => {
+    // Quien acaba de activar Match Replay todavia no tiene la carpeta: el juego
+    // la crea cuando guarda su primera repeticion, al terminar la partida.
+    // Antes se daba por perdida la sesion entera en cuanto se veia que no
+    // estaba, asi que la primera partida despues de activarlo era justo la que
+    // se quedaba sin marcadores.
+    const tarde = mkdtempSync(join(tmpdir(), 'clipper-r6-tarde-'));
+    const provider = new R6ReplayProvider(tarde);
+    const received: RawGameEvent[] = [];
+    provider.on('raw', (raw: RawGameEvent) => received.push(raw));
+
+    provider.start(0);
+    expect(provider.getState().status).toBe('unavailable');
+
+    // El juego termina la partida y crea la carpeta con la repeticion dentro.
+    const aparecida = join(tarde, 'My Games', 'Rainbow Six - Siege', 'perfil-1', 'MatchReplay');
+    mkdirSync(aparecida, { recursive: true });
+    const file = join(aparecida, 'ronda1.rec');
+    writeFileSync(
+      file,
+      buildReplayFile(HEADER, [
+        { kind: 'time', secondsRemaining: 180 },
+        { kind: 'kill', killer: ME, victim: 'Enemigo', headshot: true },
+      ]),
+    );
+    const when = new Date(Date.now() - 10_000);
+    utimesSync(file, when, when);
+
+    await provider.scan();
+
+    expect(provider.getState().status).toBe('connected');
+    expect(received.map((raw) => raw.key)).toContain('kill');
+
+    provider.dispose();
+    rmSync(tarde, { recursive: true, force: true });
+  });
+
   it('emite los eventos de una ronda con el formato del adaptador', async () => {
     writeReplay(
       'ronda1.rec',

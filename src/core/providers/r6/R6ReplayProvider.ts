@@ -93,6 +93,13 @@ export class R6ReplayProvider extends EventEmitter {
     this.replayRoots = findReplayRoots(this.documentsDir);
 
     if (this.replayRoots.length === 0) {
+      // Sin carpeta todavia, pero eso no significa que no vaya a haberla.
+      //
+      // El juego crea `MatchReplay` cuando guarda su primera repeticion, no al
+      // activar la opcion. Quien acaba de activarla esta exactamente en este
+      // caso, y rendirse aqui dejaba sin marcadores toda la sesion: la primera
+      // partida despues de activarlo era justo la que no se enteraba. Asi que
+      // se sigue mirando, y en cuanto aparezca la carpeta se empieza a leer.
       this.setState({
         status: 'unavailable',
         provider: 'r6-replay',
@@ -100,19 +107,25 @@ export class R6ReplayProvider extends EventEmitter {
           'No se ha encontrado la carpeta de repeticiones de Rainbow Six Siege. ' +
           'Activa la funcion Match Replay en las opciones del juego para tener marcadores.',
       });
-      log.warn('Sin carpeta de repeticiones: no habra eventos de Rainbow Six');
-      return;
+      log.warn(
+        'Sin carpeta de repeticiones todavia; se seguira comprobando por si aparece ' +
+          'al terminar la primera partida',
+      );
+    } else {
+      log.info(`Vigilando repeticiones en: ${this.replayRoots.join(', ')}`);
+      this.announceConnected();
     }
 
-    log.info(`Vigilando repeticiones en: ${this.replayRoots.join(', ')}`);
+    if (this.timer) return;
+    this.timer = setInterval(() => void this.scan(), POLL_INTERVAL_MS);
+  }
+
+  private announceConnected(): void {
     this.setState({
       status: 'connected',
       provider: 'r6-replay',
       message: 'Leyendo las repeticiones de Rainbow Six al terminar cada ronda',
     });
-
-    if (this.timer) return;
-    this.timer = setInterval(() => void this.scan(), POLL_INTERVAL_MS);
   }
 
   stop(): void {
@@ -131,7 +144,6 @@ export class R6ReplayProvider extends EventEmitter {
    * perderian: llegarian cuando la grabacion ya se ha consolidado.
    */
   async drain(waitMs = 4000): Promise<void> {
-    if (this.replayRoots.length === 0) return;
     await new Promise((resolve) => setTimeout(resolve, waitMs));
     // Se ignora el margen de antiguedad: el juego ya ha cerrado el fichero.
     await this.scan(true);
@@ -144,6 +156,15 @@ export class R6ReplayProvider extends EventEmitter {
     if (this.scanning) return;
     this.scanning = true;
     try {
+      // La carpeta puede aparecer a mitad de sesion: es lo que pasa la primera
+      // vez, cuando el juego guarda la repeticion de la primera partida.
+      if (this.replayRoots.length === 0) {
+        this.replayRoots = findReplayRoots(this.documentsDir);
+        if (this.replayRoots.length === 0) return;
+        log.info(`Carpeta de repeticiones encontrada: ${this.replayRoots.join(', ')}`);
+        this.announceConnected();
+      }
+
       for (const root of this.replayRoots) {
         const files = await collectReplayFiles(root);
         for (const file of files) {
