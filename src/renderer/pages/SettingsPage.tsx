@@ -211,13 +211,16 @@ function RecordingTab({
           </select>
         </Row>
 
-        <Row label="Que se captura">
+        <Row
+          label="Que se captura"
+          hint="Solo el juego graba unicamente su ventana, asi que cambiar de programa a mitad de partida no sale en el video. Si no encuentra la ventana, graba la pantalla igualmente."
+        >
           <select
             className="cap"
             value={r.captureMode}
             onChange={(e) => onChange({ recording: { captureMode: e.target.value } })}
           >
-            <option value="game">Proceso del juego</option>
+            <option value="game">Solo el juego</option>
             <option value="display">Pantalla completa</option>
           </select>
         </Row>

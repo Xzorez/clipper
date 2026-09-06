@@ -7,6 +7,13 @@ export interface StartRecordingRequest {
    * La prepara quien sepa capturarlo; el grabador solo la consume.
    */
   audioPipePath?: string | null;
+  /**
+   * Tuberia con el video de la ventana del juego ya codificado, o null para
+   * capturar la pantalla entera.
+   */
+  videoPipePath?: string | null;
+  /** Tamano real de esa ventana, que manda sobre la resolucion configurada. */
+  videoSize?: { width: number; height: number } | null;
   /** Ruta de salida SIN extension: el backend anade la suya. */
   outputPathWithoutExt: string;
   settings: RecordingSettings;

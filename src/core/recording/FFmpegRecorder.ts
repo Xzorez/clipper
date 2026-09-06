@@ -130,6 +130,7 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
     width: number;
     height: number;
     audioPipe: string | null;
+    videoPipe: string | null;
   } | null = null;
   private verifyTimer: NodeJS.Timeout | null = null;
 
@@ -272,9 +273,12 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
     this.pendingRequest = request;
     this.pendingArgsContext = {
       encoder,
-      width: output.width,
-      height: output.height,
+      // Con captura de ventana no se escala: el video ya viene codificado y
+      // volver a tocarlo seria recomprimir. Manda el tamano real de la ventana.
+      width: request.videoSize?.width ?? output.width,
+      height: request.videoSize?.height ?? output.height,
       audioPipe: request.audioPipePath ?? null,
+      videoPipe: request.videoPipePath ?? null,
     };
     this.lastOutTimeMs = 0;
     this.firstFrameSeen = false;
@@ -283,7 +287,11 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
     // Se decide COMO capturar antes de empezar, no despues de descubrir que el
     // video salio en negro. Dura poco mas de un segundo la primera vez y nada
     // las siguientes, porque el resultado se recuerda por juego.
-    const candidate = await this.chooseCandidate(request);
+    // Con el video llegando de la ventana no hay pantalla que sondear: el
+    // sondeo mide si se ve imagen en un monitor, y aqui no se graba ninguno.
+    const candidate = request.videoPipePath
+      ? { method: 'ddagrab' as const, outputIndex: 0 }
+      : await this.chooseCandidate(request);
     if (!candidate) {
       throw new Error(this.lastProbeFailure ?? 'No se ha podido capturar la pantalla.');
     }
@@ -385,6 +393,7 @@ export class FFmpegRecorder extends EventEmitter implements ScreenRecorder {
         bitrateKbps: request.settings.bitrate,
         outputIndex: candidate.outputIndex,
         audioPipe: context.audioPipe,
+        videoPipe: context.videoPipe,
       },
       this.currentFilePath,
     );

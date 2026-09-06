@@ -77,6 +77,17 @@ function createWindow(): void {
       nodeIntegration: false,
       sandbox: false,
       webSecurity: true,
+      /*
+       * Sin frenado en segundo plano.
+       *
+       * Chromium ralentiza las ventanas que no se ven, y desde que cerrar
+       * esconde en la bandeja, la ventana pasa escondida toda la partida. Pero
+       * es ella quien captura el sonido y la imagen del juego: frenarla no
+       * ahorra nada, lo estropea. Se noto de golpe en una partida real, con
+       * 217 segundos de silencio de relleno porque el audio llegaba a
+       * trompicones.
+       */
+      backgroundThrottling: false,
     },
   });
 

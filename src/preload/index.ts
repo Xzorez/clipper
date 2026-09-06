@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '../shared/channels';
 import type { AudioCaptureRequest, AudioCaptureResult } from '../shared/audio';
+import type { VideoCaptureRequest, VideoCaptureResult } from '../shared/video';
 import type {
   AppSettings,
   ClipRecord,
@@ -99,6 +100,11 @@ const api: ClipperApi = {
   onAudioStop: (cb: () => void) => subscribe(IPC.ON_AUDIO_STOP, cb),
   audioReady: (result: AudioCaptureResult) => ipcRenderer.send(IPC.AUDIO_READY, result),
   sendAudioChunk: (chunk: ArrayBuffer) => ipcRenderer.send(IPC.AUDIO_CHUNK, chunk),
+
+  onVideoStart: (cb: (request: VideoCaptureRequest) => void) => subscribe(IPC.ON_VIDEO_START, cb),
+  onVideoStop: (cb: () => void) => subscribe(IPC.ON_VIDEO_STOP, cb),
+  videoReady: (result: VideoCaptureResult) => ipcRenderer.send(IPC.VIDEO_READY, result),
+  sendVideoChunk: (chunk: ArrayBuffer) => ipcRenderer.send(IPC.VIDEO_CHUNK, chunk),
 };
 
 contextBridge.exposeInMainWorld('clipper', api);

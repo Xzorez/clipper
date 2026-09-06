@@ -11,6 +11,7 @@ import type {
   UpdateStatus,
 } from './types';
 import type { AudioCaptureRequest, AudioCaptureResult } from './audio';
+import type { VideoCaptureRequest, VideoCaptureResult } from './video';
 
 export interface CreateClipRequest {
   recordingId: string;
@@ -97,4 +98,12 @@ export interface ClipperApi {
   audioReady(result: AudioCaptureResult): void;
   /** Entrega un bloque de audio en crudo (PCM 16 bits, 48 kHz, estereo). */
   sendAudioChunk(chunk: ArrayBuffer): void;
+
+  /** El proceso principal pide capturar la ventana de un juego. */
+  onVideoStart(callback: (request: VideoCaptureRequest) => void): Unsubscribe;
+  onVideoStop(callback: () => void): Unsubscribe;
+  /** Responde si la captura ha podido arrancar, y con que tamano. */
+  videoReady(result: VideoCaptureResult): void;
+  /** Entrega un trozo de video ya codificado. */
+  sendVideoChunk(chunk: ArrayBuffer): void;
 }

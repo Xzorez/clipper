@@ -28,6 +28,8 @@ export const IPC = {
   WINDOW_MAXIMIZE: 'clipper:window-maximize',
   WINDOW_CLOSE: 'clipper:window-close',
   AUDIO_CHUNK: 'clipper:audio-chunk',
+  VIDEO_CHUNK: 'clipper:video-chunk',
+  VIDEO_READY: 'clipper:video-ready',
   AUDIO_READY: 'clipper:audio-ready',
 
   // Notificaciones (main -> renderer)
@@ -39,6 +41,8 @@ export const IPC = {
   ON_NAVIGATE: 'clipper:on-navigate',
   ON_UPDATE_STATUS: 'clipper:on-update-status',
   ON_AUDIO_START: 'clipper:on-audio-start',
+  ON_VIDEO_START: 'clipper:on-video-start',
+  ON_VIDEO_STOP: 'clipper:on-video-stop',
   ON_AUDIO_STOP: 'clipper:on-audio-stop',
 } as const;
 

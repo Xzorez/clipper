@@ -32,6 +32,24 @@ const SIDECAR_FLUSH_INTERVAL_MS = 15_000;
  * ventana de Electron, y el gestor de grabaciones no deberia saber nada de
  * ventanas. En los tests se sustituye por un doble.
  */
+/**
+ * Quien sabe capturar la ventana de un juego.
+ *
+ * Se inyecta igual que el sonido: depende de la ventana de Electron, y el
+ * gestor de grabaciones no deberia saber nada de ventanas.
+ */
+export interface VideoSource {
+  /** Prepara la captura. Devuelve null si hay que grabar la pantalla entera. */
+  begin(params: {
+    candidates: string[];
+    width: number;
+    height: number;
+    fps: number;
+    bitrateKbps: number;
+  }): Promise<{ pipePath: string; width: number; height: number } | null>;
+  end(): Promise<void>;
+}
+
 export interface AudioSource {
   /** Arranca la captura. Devuelve la tuberia, o null si no habra sonido. */
   begin(settings: AppSettings['recording']): Promise<string | null>;
@@ -86,6 +104,7 @@ export class RecordingManager extends EventEmitter {
   private readonly thumbnails: ThumbnailService;
   private readonly audio?: AudioSource;
   private readonly highlights?: HighlightService;
+  private readonly video?: VideoSource;
   private settingsForHighlights: AppSettings['events'] | null = null;
 
   private active: ActiveRecording | null = null;
@@ -106,6 +125,8 @@ export class RecordingManager extends EventEmitter {
     audio?: AudioSource;
     /** Opcional: deduce momentos del sonido cuando el juego no da eventos. */
     highlights?: HighlightService;
+    /** Opcional: sin el, se graba la pantalla entera en vez de la ventana. */
+    video?: VideoSource;
   }) {
     super();
     this.db = deps.db;
@@ -116,6 +137,7 @@ export class RecordingManager extends EventEmitter {
     this.thumbnails = deps.thumbnails;
     this.audio = deps.audio;
     this.highlights = deps.highlights;
+    this.video = deps.video;
 
     this.wireRecorder();
     this.wireEvents();
@@ -287,6 +309,29 @@ export class RecordingManager extends EventEmitter {
     // El sonido se prepara antes que el video para poder pasarle la tuberia al
     // grabador. Si falla, se sigue adelante sin audio: una partida muda vale
     // mucho mas que ninguna partida.
+    // La ventana del juego, si se pide capturar el juego y se encuentra. Si no
+    // aparece, se sigue con la captura de pantalla de siempre: es preferible
+    // grabar de mas que no grabar.
+    let capture: Awaited<ReturnType<VideoSource['begin']>> = null;
+    if (this.video && settings.recording.captureMode === 'game') {
+      try {
+        capture = await this.video.begin({
+          candidates: [
+            params.gameTitle ?? '',
+            adapter.displayName,
+            (params.gameProcessName ?? '').replace(/[.]exe$/i, ''),
+          ].filter(Boolean),
+          width: settings.recording.resolution === 1080 ? 1920 : 3840,
+          height: settings.recording.resolution,
+          fps: settings.recording.fps,
+          bitrateKbps: settings.recording.bitrate,
+        });
+      } catch (err) {
+        log.warn(`No se ha podido capturar la ventana: ${(err as Error).message}`);
+        capture = null;
+      }
+    }
+
     let audioPipePath: string | null = null;
     if (this.audio) {
       try {
@@ -303,6 +348,8 @@ export class RecordingManager extends EventEmitter {
         outputPathWithoutExt: outputBase,
         settings: settings.recording,
         audioPipePath,
+        videoPipePath: capture?.pipePath ?? null,
+        videoSize: capture ? { width: capture.width, height: capture.height } : null,
         gamePid: params.gamePid,
         gameProcessName: params.gameProcessName,
         gameIsElevated: params.gameIsElevated,
@@ -310,6 +357,7 @@ export class RecordingManager extends EventEmitter {
     } catch (err) {
       this.eventManager.end();
       await this.audio?.end().catch(() => undefined);
+      await this.video?.end().catch(() => undefined);
       // El mensaje del grabador ya explica que hacer cuando la causa es
       // conocida (por ejemplo, pantalla completa exclusiva). No se le anade
       // texto generico que lo diluya.
@@ -403,9 +451,11 @@ export class RecordingManager extends EventEmitter {
     result: StopRecordingResult,
     status: RecordingRecord['status'],
   ): Promise<RecordingRecord | null> {
-    // Se corta el sonido en cuanto termina el video, pase lo que pase: aqui
-    // desembocan tanto la parada normal como el cierre inesperado del juego.
+    // Se cortan sonido e imagen en cuanto termina la grabacion, pase lo que
+    // pase: aqui desembocan tanto la parada normal como el cierre inesperado
+    // del juego.
     await this.audio?.end().catch(() => undefined);
+    await this.video?.end().catch(() => undefined);
 
     const active = this.active;
     if (!active) return null;

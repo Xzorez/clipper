@@ -20,6 +20,7 @@ import { HotkeyService, HotkeyAction } from '../core/services/HotkeyService';
 import { RecoveryService } from '../core/services/RecoveryService';
 import { UpdateService } from '../core/services/UpdateService';
 import { AudioBridge } from './AudioBridge';
+import { VideoBridge } from './VideoBridge';
 import { HighlightService } from '../core/services/HighlightService';
 import { AdapterRegistry } from '../core/games/registry';
 import { GepProvider } from '../core/gep/GepProvider';
@@ -112,6 +113,7 @@ export class AppContext {
       thumbnails: this.thumbnails,
       audio: new AudioBridge(() => this.getWindow()),
       highlights: new HighlightService(),
+      video: new VideoBridge(() => this.getWindow()),
     });
 
     this.gep = new GepProvider(this.registry);
