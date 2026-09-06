@@ -27,6 +27,17 @@ function isTerminal(status: ProviderState['status']): boolean {
 }
 
 /**
+ * Prioridad de un juego frente a otro detectado a la vez.
+ *
+ * Los tres juegos con adaptador propio traen marcadores automaticos; el
+ * generico solo graba. Cuando dos detecciones se pisan, gana el que da mas
+ * informacion, y a igualdad gana el que ya estaba.
+ */
+function rankOf(game: GameKey): number {
+  return game === 'generic' ? 0 : 1;
+}
+
+/**
  * Espera antes de cortar la grabacion cuando el juego se cierra.
  * Da margen para que lleguen los ultimos eventos (match_end, resultado) y para
  * que el encoder termine de escribir.
@@ -281,6 +292,50 @@ export class GameDetectionService extends EventEmitter {
       return;
     }
 
+    // Otro juego distinto mientras hay una grabacion en marcha.
+    //
+    // Sin esto, la deteccion nueva se limitaba a pisar `activeAdapter`. La
+    // grabacion anterior no se cerraba: FFmpeg seguia escribiendo un fichero
+    // que ya nadie podia parar ni encontrar, y su ficha en la biblioteca
+    // quedaba a nombre de un juego que no era. Paso de verdad con el lanzador
+    // anti-trampas de Ubisoft, que aparecio como "otro juego" hora y media
+    // despues de empezar a grabar Rainbow Six y dejo el video huerfano
+    // creciendo en disco hasta cerrar la aplicacion.
+    //
+    // No vale con mirar si ya se esta grabando: entre detectar el juego y tener
+    // a FFmpeg escribiendo pasan un par de segundos, y es justo ahi donde
+    // llegaba la otra deteccion. Cuenta como ocupado desde que hay un juego
+    // activo.
+    const ocupado =
+      this.state === DetectionState.RECORDING || this.state === DetectionState.GAME_DETECTED;
+    if (this.activeAdapter && this.activeAdapter.game !== adapter.game && ocupado) {
+      const current = this.activeAdapter;
+
+      if (rankOf(adapter.game) <= rankOf(current.game)) {
+        log.info(
+          `${adapter.displayName} detectado mientras esta activo ${current.displayName}; ` +
+            'se ignora y sigue la sesion en curso',
+        );
+        return;
+      }
+
+      // El recien llegado si aporta marcadores y el que esta no. Se cierra la
+      // sesion anterior como es debido, con su video finalizado y su ficha
+      // completa, antes de empezar la nueva.
+      //
+      // Primero hay que dejar que termine el arranque a medias, o se cerraria
+      // una grabacion que todavia no existe y el proceso quedaria suelto igual.
+      if (this.beginInFlight) await this.beginInFlight.catch(() => false);
+      if (this.activeAdapter === current) {
+        log.info(
+          `${adapter.displayName} releva a ${current.displayName}: ` +
+            'se cierra la sesion en curso antes de empezar la nueva',
+        );
+        this.cancelStopTimer();
+        await this.finishSession(current);
+      }
+    }
+
     this.cancelStopTimer();
 
     const settings = this.settingsService.get();
@@ -342,7 +397,13 @@ export class GameDetectionService extends EventEmitter {
       this.emitChange();
       return false;
     }
-    if (this.recordingManager.isRecording) return true;
+    // Ya se estaba grabando este juego. Devolver true sin mas dejaba el estado
+    // en GAME_DETECTED con la grabacion en marcha, y la ventana anunciaba
+    // "LISTO" durante toda la partida.
+    if (this.recordingManager.isRecording) {
+      this.setState(DetectionState.RECORDING);
+      return true;
+    }
 
     const settings = this.settingsService.get();
     const started = await this.recordingManager.start({

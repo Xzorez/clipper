@@ -202,7 +202,16 @@ function bareName(processName: string): string {
 
 /** True si el ejecutable es un lanzador o un servicio, no un juego. */
 export function isNotAGame(processName: string): boolean {
-  return NOT_GAMES.includes(bareName(processName));
+  const bare = bareName(processName);
+  if (NOT_GAMES.includes(bare)) return true;
+
+  // Los lanzadores y los servicios anti-trampas viven en la carpeta del juego
+  // y abren ventana propia, asi que pasan todos los filtros de ruta: por la
+  // ruta son indistinguibles del juego. Pero cuando uno de ellos esta en
+  // pantalla la partida ni ha empezado, y tratarlo como un juego mas hacia que
+  // le robase la grabacion al que ya estaba jugandose. El de Ubisoft
+  // (sen_launcher.exe) lo hizo con una partida de Rainbow Six en marcha.
+  return bare.endsWith('launcher') || bare.includes('anticheat');
 }
 
 /**
