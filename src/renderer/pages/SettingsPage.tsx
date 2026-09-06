@@ -227,7 +227,7 @@ function RecordingTab({
 
         <Row
           label="Audio del sistema"
-          hint="El sonido del juego. Si tu salida por defecto es un casco inalambrico apagado, Windows no deja capturarlo: enciendelo antes de jugar."
+          hint="El sonido del juego y de todo lo que suene, tal como sale por tus altavoces o cascos."
         >
           <Switch
             value={r.captureSystemAudio}

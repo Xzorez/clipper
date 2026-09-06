@@ -5,3 +5,6 @@ release/
 .env
 recordings/
 release/
+
+# Capturador nativo: se compila con "npm run dist", no se versiona.
+resources/native/

@@ -23,6 +23,9 @@ const PUMP_INTERVAL_MS = 100;
  */
 const MAX_PENDING_BYTES = Math.round(AUDIO_BYTES_PER_SECOND * 1.5);
 
+/** De donde viene cada trozo de audio. */
+export type AudioTrack = 'system' | 'mic';
+
 /** Redondea a muestra completa: media muestra intercambiaria los canales. */
 function align(bytes: number): number {
   return Math.max(0, bytes - (bytes % 4));
@@ -59,8 +62,15 @@ export class AudioPipe {
   readonly path: string;
   private server: Server | null = null;
   private socket: Socket | null = null;
-  private pending: Buffer[] = [];
-  private pendingBytes = 0;
+  /**
+   * Una cola por fuente.
+   *
+   * El sonido del sistema y el microfono llegan por caminos distintos y a su
+   * propio ritmo, asi que no se pueden encadenar en una sola cola: hay que
+   * juntarlos muestra a muestra en el momento de entregarlos.
+   */
+  private readonly pending: Record<AudioTrack, Buffer[]> = { system: [], mic: [] };
+  private readonly pendingBytes: Record<AudioTrack, number> = { system: 0, mic: 0 };
   private pump: NodeJS.Timeout | null = null;
   private closed = false;
   private silencePadded = 0;
@@ -109,13 +119,13 @@ export class AudioPipe {
    * descarta lo mas viejo si nadie lo consume, para que un productor
    * desbocado o un FFmpeg que nunca conecta no se coman la memoria.
    */
-  write(chunk: Buffer): void {
+  write(chunk: Buffer, track: AudioTrack = 'system'): void {
     if (this.closed) return;
-    this.pending.push(chunk);
-    this.pendingBytes += chunk.length;
-    while (this.pendingBytes > MAX_PENDING_BYTES && this.pending.length > 1) {
-      const dropped = this.pending.shift();
-      this.pendingBytes -= dropped ? dropped.length : 0;
+    this.pending[track].push(chunk);
+    this.pendingBytes[track] += chunk.length;
+    while (this.pendingBytes[track] > MAX_PENDING_BYTES && this.pending[track].length > 1) {
+      const dropped = this.pending[track].shift();
+      this.pendingBytes[track] -= dropped ? dropped.length : 0;
     }
   }
 
@@ -136,33 +146,46 @@ export class AudioPipe {
 
     const elapsedMs = Date.now() - this.startedAt;
     const target = align(Math.round((elapsedMs / 1000) * AUDIO_BYTES_PER_SECOND));
-    let missing = target - this.written;
+    const missing = target - this.written;
     if (missing <= 0) return;
 
-    while (missing > 0 && this.pending.length > 0) {
-      const head = this.pending[0];
-      if (head.length <= missing) {
-        this.send(head);
-        this.pending.shift();
-        this.pendingBytes -= head.length;
-        missing -= head.length;
-      } else {
-        const part = head.subarray(0, align(missing));
-        if (part.length === 0) break;
-        this.pending[0] = head.subarray(part.length);
-        this.pendingBytes -= part.length;
-        this.send(part);
-        missing -= part.length;
-      }
+    const system = this.take('system', missing);
+    const mic = this.take('mic', missing);
+
+    if (system.empty && mic.empty) {
+      // Nada que entregar: silencio, que es lo que mantiene el audio cuadrado
+      // con la imagen cuando quien produce se atasca.
+      this.silencePadded += missing;
+      this.send(Buffer.alloc(missing));
+      return;
     }
 
-    // Lo que falte va en silencio. Es la pieza que impide que un productor
-    // lento arrastre a la captura entera.
-    const pad = align(missing);
-    if (pad > 0) {
-      this.send(Buffer.alloc(pad));
-      this.silencePadded += pad;
+    this.send(system.empty ? mic.data : mic.empty ? system.data : mixInto(system.data, mic.data));
+  }
+
+  /**
+   * Saca exactamente `bytes` de una fuente, rellenando con silencio lo que
+   * falte.
+   *
+   * Devolver siempre el tamano pedido es lo que permite sumar las dos fuentes
+   * sin comprobaciones por medio, y que una fuente muda no arrastre a la otra.
+   */
+  private take(track: AudioTrack, bytes: number): { data: Buffer; empty: boolean } {
+    const queue = this.pending[track];
+    if (queue.length === 0) return { data: EMPTY, empty: true };
+
+    const out = Buffer.alloc(bytes);
+    let filled = 0;
+    while (filled < bytes && queue.length > 0) {
+      const head = queue[0];
+      const take = Math.min(head.length, bytes - filled);
+      head.copy(out, filled, 0, take);
+      filled += take;
+      this.pendingBytes[track] -= take;
+      if (take === head.length) queue.shift();
+      else queue[0] = head.subarray(take);
     }
+    return { data: out, empty: false };
   }
 
   private send(chunk: Buffer): void {
@@ -176,7 +199,8 @@ export class AudioPipe {
     this.closed = true;
     if (this.pump) clearInterval(this.pump);
     this.pump = null;
-    this.pending = [];
+    this.pending.system = [];
+    this.pending.mic = [];
 
     if (this.socket) {
       try {
@@ -192,4 +216,23 @@ export class AudioPipe {
       this.server = null;
     });
   }
+}
+
+/** Bufer vacio reutilizable: evita reservar memoria en cada ciclo. */
+const EMPTY = Buffer.alloc(0);
+
+/**
+ * Suma dos pistas muestra a muestra.
+ *
+ * Se recorta en los extremos en lugar de bajar el volumen: mezclar el juego y
+ * la voz rara vez satura, y atenuar siempre por si acaso dejaria toda la
+ * grabacion mas baja de lo que deberia.
+ */
+function mixInto(a: Buffer, b: Buffer): Buffer {
+  const out = Buffer.alloc(a.length);
+  for (let i = 0; i + 1 < a.length; i += 2) {
+    const sum = a.readInt16LE(i) + b.readInt16LE(i);
+    out.writeInt16LE(sum > 32767 ? 32767 : sum < -32768 ? -32768 : sum, i);
+  }
+  return out;
 }

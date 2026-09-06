@@ -120,6 +120,47 @@ describe('AudioPipe', () => {
     expect(recibido().length % 4).toBe(0);
   });
 
+  describe('mezcla de las dos fuentes', () => {
+    /** Un bloque de muestras con el mismo valor en los dos canales. */
+    function tono(valor: number, muestras: number): Buffer {
+      const buf = Buffer.alloc(muestras * 4);
+      for (let i = 0; i < muestras * 2; i++) buf.writeInt16LE(valor, i * 2);
+      return buf;
+    }
+
+    it('suma el sonido del sistema y el microfono', async () => {
+      const { pipe, recibido } = await abrir();
+      pipe.write(tono(1000, 480), 'system');
+      pipe.write(tono(2000, 480), 'mic');
+      await new Promise((r) => setTimeout(r, 400));
+
+      const salida = recibido();
+      expect(salida.length).toBeGreaterThan(100);
+      expect(salida.readInt16LE(0)).toBe(3000);
+    });
+
+    it('una fuente muda no arrastra a la otra', async () => {
+      // El caso normal en esta maquina: el microfono desactivado y solo el
+      // sonido del juego. Si la mezcla exigiera las dos, no sonaria nada.
+      const { pipe, recibido } = await abrir();
+      pipe.write(tono(1500, 480), 'system');
+      await new Promise((r) => setTimeout(r, 400));
+
+      expect(recibido().readInt16LE(0)).toBe(1500);
+    });
+
+    it('recorta en vez de dar la vuelta al saturar', async () => {
+      // Sumar dos picos fuertes desborda un entero de 16 bits. Sin recortar,
+      // el valor daria la vuelta y un momento intenso sonaria a chasquido.
+      const { pipe, recibido } = await abrir();
+      pipe.write(tono(30000, 480), 'system');
+      pipe.write(tono(30000, 480), 'mic');
+      await new Promise((r) => setTimeout(r, 400));
+
+      expect(recibido().readInt16LE(0)).toBe(32767);
+    });
+  });
+
   it('no crece sin limite si nadie llega a conectar', async () => {
     const pipe = new AudioPipe('test-' + randomBytes(4).toString('hex'));
     await pipe.start();

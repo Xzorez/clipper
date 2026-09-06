@@ -24,7 +24,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
-    "dist": "npm run build && electron-builder --win --publish never",
+    "build:native": "cmd /c scripts\build-native.bat",
+    "dist": "npm run build:native && npm run build && electron-builder --win --publish never",
     "release": "node scripts/release.js"
   },
   "dependencies": {
@@ -63,6 +64,13 @@
     ],
     "asarUnpack": [
       "node_modules/ffmpeg-static/**"
+    ],
+    "extraResources": [
+      {
+        "comment": "El capturador de sonido del sistema. Fuera del asar porque un ejecutable no se puede lanzar desde dentro del archivo.",
+        "from": "resources/native",
+        "to": "native"
+      }
     ],
     "win": {
       "icon": "resources/icon.ico",

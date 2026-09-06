@@ -1,5 +1,6 @@
 import { BrowserWindow, ipcMain } from 'electron';
 import { AudioPipe } from '../core/recording/AudioPipe';
+import { SystemAudioCapture } from '../core/recording/SystemAudioCapture';
 import { AudioSource } from '../core/recording/RecordingManager';
 import { AudioCaptureRequest, AudioCaptureResult } from '../shared/audio';
 import { RecordingSettings } from '../shared/types';
@@ -27,10 +28,19 @@ const READY_TIMEOUT_MS = 5000;
 export class AudioBridge implements AudioSource {
   private pipe: AudioPipe | null = null;
   private capturing = false;
+  private system: SystemAudioCapture | null = null;
+  /**
+   * Que representa lo que manda la ventana.
+   *
+   * Cuando el sonido del sistema lo captura el programa propio, la ventana
+   * solo aporta el microfono y las dos cosas hay que sumarlas. Si no, la
+   * ventana manda ya lo que haya conseguido mezclar.
+   */
+  private windowTrack: 'system' | 'mic' = 'system';
 
   constructor(private readonly getWindow: () => BrowserWindow | null) {
     ipcMain.on(IPC.AUDIO_CHUNK, (_event, chunk: ArrayBuffer) => {
-      if (this.pipe) this.pipe.write(Buffer.from(chunk));
+      if (this.pipe) this.pipe.write(Buffer.from(chunk), this.windowTrack);
     });
   }
 
@@ -55,7 +65,39 @@ export class AudioBridge implements AudioSource {
       return null;
     }
 
-    const result = await this.askWindowToCapture(window, request);
+    // El sonido del sistema, por la via directa de Windows. Se intenta antes
+    // que la ventana porque es la que funciona: el bucle de Chromium falla en
+    // algunas maquinas sin nada que se pueda hacer desde aqui.
+    let systemOk = false;
+    if (request.system && SystemAudioCapture.isAvailable()) {
+      const capture = new SystemAudioCapture();
+      if (capture.start()) {
+        capture.on('data', (chunk: Buffer) => this.pipe?.write(chunk, 'system'));
+        this.system = capture;
+        systemOk = true;
+      }
+    }
+
+    // A la ventana solo se le pide lo que falte.
+    const fromWindow: AudioCaptureRequest = {
+      system: request.system && !systemOk,
+      microphone: request.microphone,
+    };
+    this.windowTrack = systemOk ? 'mic' : 'system';
+
+    const result = fromWindow.system || fromWindow.microphone
+      ? await this.askWindowToCapture(window, fromWindow)
+      : { system: false, microphone: false };
+
+    if (systemOk) {
+      this.pipe = pipe;
+      this.capturing = fromWindow.microphone && Boolean(result?.microphone);
+      log.info(
+        `Capturando sonido (sistema: si, microfono: ${result?.microphone ? 'si' : 'no'})`,
+      );
+      return pipe.path;
+    }
+
     if (!result || (!result.system && !result.microphone)) {
       // Nada que enviar: se cierra la tuberia para que FFmpeg no espere una
       // pista de audio que no va a llegar nunca.
@@ -82,6 +124,13 @@ export class AudioBridge implements AudioSource {
   }
 
   async end(): Promise<void> {
+    if (this.system) {
+      if (this.system.bytesCaptured === 0) {
+        log.warn('El capturador de sonido del sistema no llego a captar nada');
+      }
+      this.system.stop();
+      this.system = null;
+    }
     if (this.capturing) {
       const window = this.getWindow();
       if (window && !window.isDestroyed()) window.webContents.send(IPC.ON_AUDIO_STOP, null);
