@@ -96,11 +96,8 @@ export async function optimizeForPlayback(filePath: string): Promise<boolean> {
     return false;
   }
 
-  try {
-    renameSync(temp, filePath);
-  } catch (err) {
-    log.warn(`No se ha podido sustituir la grabacion: ${(err as Error).message}`);
-    safeRemove(temp);
+  if (!(await renameWithRetry(temp, filePath))) {
+    await safeRemoveWithRetry(temp);
     return false;
   }
 
@@ -131,6 +128,60 @@ function safeRemove(path: string): void {
     if (existsSync(path)) unlinkSync(path);
   } catch {
     /* si no se puede, se limpiara en el siguiente arranque */
+  }
+}
+
+/** Errores de Windows que significan "ahora mismo no, prueba en un momento". */
+export function isTemporaryLock(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException).code;
+  return code === 'EPERM' || code === 'EBUSY' || code === 'EACCES';
+}
+
+const RETRY_ATTEMPTS = 5;
+const RETRY_WAIT_MS = 400;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Sustituye el fichero original por el reordenado, con reintentos.
+ *
+ * Windows no deja renombrar por encima de un fichero que alguien tiene
+ * abierto, y aqui siempre hay alguien: el propio FFmpeg que acaba de terminar
+ * tarda un momento en soltar el descriptor. Rendirse al primer intento
+ * significaba dejar la partida sin reordenar, o sea tardando cinco segundos en
+ * abrirse en vez de abrirse al instante. Un par de esperas cortas convierten
+ * casi todos esos casos en un renombrado normal.
+ */
+async function renameWithRetry(from: string, to: string): Promise<boolean> {
+  let last: unknown;
+  for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
+    try {
+      renameSync(from, to);
+      if (attempt > 1) log.info(`La grabacion se ha sustituido al intento ${attempt}`);
+      return true;
+    } catch (err) {
+      last = err;
+      if (!isTemporaryLock(err)) break;
+      if (attempt < RETRY_ATTEMPTS) await wait(RETRY_WAIT_MS);
+    }
+  }
+  log.warn(
+    `No se ha podido sustituir la grabacion: ${(last as Error).message}. ` +
+      'Se conserva la original, que se abrira mas despacio',
+  );
+  return false;
+}
+
+/** Igual que safeRemove, pero dandole tiempo a Windows a soltar el fichero. */
+async function safeRemoveWithRetry(path: string): Promise<void> {
+  for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
+    try {
+      if (existsSync(path)) unlinkSync(path);
+      return;
+    } catch (err) {
+      if (!isTemporaryLock(err) || attempt === RETRY_ATTEMPTS) return;
+      await wait(RETRY_WAIT_MS);
+    }
   }
 }
 

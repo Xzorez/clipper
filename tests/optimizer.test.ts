@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isReplacementSound } from '../src/core/recording/Optimizer';
+import { isReplacementSound, isTemporaryLock } from '../src/core/recording/Optimizer';
 
 /**
  * La comprobacion previa a sustituir la grabacion.
@@ -32,5 +32,27 @@ describe('sustitucion tras reordenar', () => {
 
   it('rechaza cuando no se conoce el original', () => {
     expect(isReplacementSound(0, 1_000_000)).toBe(false);
+  });
+});
+
+/**
+ * Cuando merece la pena volver a intentarlo.
+ *
+ * Windows tarda un momento en soltar un fichero despues de que quien lo tenia
+ * abierto termine, y en ese momento no deja renombrar por encima. Rendirse ahi
+ * dejaba la partida sin reordenar, tardando varios segundos en abrirse. Un
+ * fallo de verdad, en cambio, no mejora por esperar.
+ */
+describe('reintentar o rendirse', () => {
+  it('espera cuando el fichero esta cogido', () => {
+    expect(isTemporaryLock({ code: 'EPERM' })).toBe(true);
+    expect(isTemporaryLock({ code: 'EBUSY' })).toBe(true);
+    expect(isTemporaryLock({ code: 'EACCES' })).toBe(true);
+  });
+
+  it('no insiste cuando el fichero no esta o el disco esta lleno', () => {
+    expect(isTemporaryLock({ code: 'ENOENT' })).toBe(false);
+    expect(isTemporaryLock({ code: 'ENOSPC' })).toBe(false);
+    expect(isTemporaryLock(new Error('cualquier otra cosa'))).toBe(false);
   });
 });

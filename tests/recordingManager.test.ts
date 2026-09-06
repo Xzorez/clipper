@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -251,6 +251,60 @@ describe('RecordingManager', () => {
     expect(sidecar).not.toBeNull();
     expect(sidecar!.events).toHaveLength(1);
     expect(sidecar!.events[0].type).toBe(GameEventType.KILL);
+  });
+
+  /**
+   * Regresion: el trabajo posterior a la grabacion va en fila, no en tropel.
+   *
+   * Reordenar el fichero, sacar la miniatura y buscar destacados en el sonido
+   * abren los tres el mismo video. Cuando los destacados salian por su cuenta,
+   * a la vez que el reordenado, el analisis de sonido tenia el fichero cogido
+   * justo cuando el reordenado intentaba sustituirlo, y Windows negaba el
+   * renombrado con EPERM. La partida se quedaba sin reordenar, o sea tardando
+   * varios segundos en abrirse en vez de abrirse al instante. Ocurria en todas
+   * las grabaciones con destacados activados: se vio dos veces seguidas en el
+   * registro de una tarde de Rainbow Six.
+   */
+  it('no analiza el sonido hasta haber terminado con el fichero', async () => {
+    const orden: string[] = [];
+
+    class SlowThumbnails extends ThumbnailService {
+      async generate(): Promise<string | null> {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        orden.push('miniatura');
+        return null;
+      }
+    }
+
+    const highlights = {
+      analyze: async () => {
+        orden.push('destacados');
+        return [];
+      },
+    };
+
+    const propio = new RecordingManager({
+      db,
+      recorder,
+      eventManager,
+      recordingClock,
+      diskGuard,
+      thumbnails: new SlowThumbnails(join(dir, 'thumbs')),
+      highlights: highlights as never,
+    });
+
+    settings.events.audioHighlights = true;
+    await propio.start({ adapter: new ValorantAdapter(), settings });
+    recorder.emitStarted();
+    materializeVideo();
+    clock.advanceMs(20_000);
+    await propio.stop();
+
+    // El trabajo de fondo no se espera, asi que hay que darle su momento.
+    await vi.waitFor(() => expect(orden).toHaveLength(2), { timeout: 3000 });
+    expect(orden).toEqual(['miniatura', 'destacados']);
+
+    await propio.dispose();
   });
 
   it('aplica la reconciliacion del reloj a los eventos ya guardados', async () => {

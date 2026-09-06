@@ -23,6 +23,21 @@ import { createLogger } from '../logging/Logger';
 
 const log = createLogger('Recording');
 
+/** Todo lo que necesita el analisis de sonido de una partida ya guardada. */
+interface HighlightRequest {
+  recordingId: string;
+  game: GameKey;
+  filePath: string;
+  events: GameEvent[];
+  startedAtMs: number;
+  endedAtMs: number;
+  durationSec: number;
+  resolution: string;
+  fps: number;
+  encoder: string;
+  status: RecordingRecord['status'];
+}
+
 /** Cada cuanto se vuelca el sidecar a disco durante la grabacion. */
 const SIDECAR_FLUSH_INTERVAL_MS = 15_000;
 
@@ -544,26 +559,26 @@ export class RecordingManager extends EventEmitter {
       log.error(`No se pudo finalizar la grabacion en la base de datos: ${(err as Error).message}`);
     }
 
-    // Reordenar y miniatura: si fallan, la partida sigue estando entera.
+    // Reordenar, miniatura y destacados: si fallan, la partida sigue estando
+    // entera. Van en cadena, no a la vez: los tres trabajan sobre el mismo
+    // fichero y lanzarlos juntos los hacia pelearse por el.
     if (fileExists) {
-      void this.finishInBackground(active.id, filePath, durationSec, events);
-      // Los destacados van despues y por su cuenta: la partida ya esta
-      // guardada y esto es un extra que puede tardar. Nadie espera por el.
-      if (this.settingsForHighlights?.audioHighlights) {
-        void this.detectHighlights({
-          recordingId: active.id,
-          game: active.game,
-          filePath,
-          events,
-          startedAtMs: result.startTimeEpochMs ?? active.startedAt,
-          endedAtMs: endedAt,
-          durationSec,
-          resolution: active.resolution,
-          fps: active.fps,
-          encoder: active.encoder,
-          status: finalStatus,
-        });
-      }
+      const highlights = this.settingsForHighlights?.audioHighlights
+        ? {
+            recordingId: active.id,
+            game: active.game,
+            filePath,
+            events,
+            startedAtMs: result.startTimeEpochMs ?? active.startedAt,
+            endedAtMs: endedAt,
+            durationSec,
+            resolution: active.resolution,
+            fps: active.fps,
+            encoder: active.encoder,
+            status: finalStatus,
+          }
+        : null;
+      void this.finishInBackground(active.id, filePath, durationSec, events, highlights);
     }
 
     log.info(
@@ -586,19 +601,7 @@ export class RecordingManager extends EventEmitter {
    * Corre en segundo plano una vez la grabacion ya esta guardada: si falla o
    * tarda, no cambia nada de lo que ya hay en disco.
    */
-  private async detectHighlights(params: {
-    recordingId: string;
-    game: GameKey;
-    filePath: string;
-    events: GameEvent[];
-    startedAtMs: number;
-    endedAtMs: number;
-    durationSec: number;
-    resolution: string;
-    fps: number;
-    encoder: string;
-    status: RecordingRecord['status'];
-  }): Promise<void> {
+  private async detectHighlights(params: HighlightRequest): Promise<void> {
     if (!this.highlights) return;
     try {
       const found = await this.highlights.analyze({
@@ -642,14 +645,23 @@ export class RecordingManager extends EventEmitter {
    * Lo que queda por hacer con la partida ya guardada.
    *
    * Va en segundo plano y en este orden: primero se reordena el fichero, que
-   * es lo que hace que se abra al instante, y despues se saca la miniatura del
-   * fichero ya reordenado, que ademas es mas rapido. Nadie espera por esto.
+   * es lo que hace que se abra al instante; despues la miniatura, que sale
+   * antes del fichero ya reordenado; y al final los destacados, que es lo que
+   * mas tarda. Nadie espera por esto.
+   *
+   * El orden importa, y no es una preferencia. Antes los destacados salian a
+   * la vez que el reordenado, y como los dos abren el mismo video, el analisis
+   * de sonido tenia el fichero cogido justo cuando el reordenado intentaba
+   * sustituirlo: Windows negaba el renombrado y la partida se quedaba sin
+   * reordenar, es decir, tardando varios segundos en abrirse. Pasaba en todas
+   * las grabaciones con destacados activados.
    */
   private async finishInBackground(
     recordingId: string,
     filePath: string,
     durationSec: number,
     events: GameEvent[],
+    highlights: HighlightRequest | null,
   ): Promise<void> {
     try {
       if (await optimizeForPlayback(filePath)) this.emit('events-added', { recordingId, count: 0 });
@@ -657,6 +669,7 @@ export class RecordingManager extends EventEmitter {
       log.warn(`No se ha podido reordenar la grabacion: ${(err as Error).message}`);
     }
     await this.generateThumbnail(recordingId, filePath, durationSec, events);
+    if (highlights) await this.detectHighlights(highlights);
   }
 
   private async generateThumbnail(
