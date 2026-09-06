@@ -18,6 +18,7 @@ import { ThumbnailService } from '../core/services/ThumbnailService';
 import { ClipService } from '../core/services/ClipService';
 import { HotkeyService, HotkeyAction } from '../core/services/HotkeyService';
 import { RecoveryService } from '../core/services/RecoveryService';
+import { PlaybackBackfill } from '../core/services/PlaybackBackfill';
 import { UpdateService } from '../core/services/UpdateService';
 import { AudioBridge } from './AudioBridge';
 import { VideoBridge } from './VideoBridge';
@@ -54,6 +55,7 @@ export class AppContext {
   clips!: ClipService;
   hotkeys!: HotkeyService;
   recovery!: RecoveryService;
+  backfill!: PlaybackBackfill;
   updates!: UpdateService;
   registry!: AdapterRegistry;
   gep!: GepProvider;
@@ -136,6 +138,9 @@ export class AppContext {
 
     this.hotkeys = new HotkeyService();
     this.recovery = new RecoveryService(this.db, this.thumbnails);
+    this.backfill = new PlaybackBackfill(this.db, diskGuard, () =>
+      this.recordingManager.isRecording,
+    );
     this.updates = new UpdateService();
 
     this.wireEvents();
@@ -154,6 +159,13 @@ export class AppContext {
     this.detection.start();
     // Silenciosa por diseno: descarga sola y se aplica al cerrar.
     this.updates.start();
+
+    // Las grabaciones antiguas se reordenan solas, de fondo y sin prisa, para
+    // que se abran al instante como las nuevas. No bloquea el arranque y se
+    // aparta en cuanto empieza una partida.
+    void this.backfill.run().then((report) => {
+      if (report.fixed > 0) this.send(IPC.ON_LIBRARY_CHANGED, null);
+    });
 
     // Sondeo de capacidades en segundo plano: no bloquea el arranque.
     void this.refreshRecorderCapabilities();
@@ -445,6 +457,9 @@ export class AppContext {
 
   async dispose(): Promise<void> {
     if (this.statusTimer) clearInterval(this.statusTimer);
+    // El reordenado de las antiguas es lo primero en apartarse: lo que quede
+    // se hara en el siguiente arranque, y cerrar no puede esperar por un lujo.
+    this.backfill?.cancel();
     this.hotkeys?.dispose();
     this.updates?.dispose();
     await this.detection?.dispose();

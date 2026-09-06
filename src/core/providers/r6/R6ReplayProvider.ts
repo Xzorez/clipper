@@ -1,8 +1,10 @@
 import { EventEmitter } from 'node:events';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { app } from 'electron';
 import { GEP_GAME_IDS, ProviderState } from '../../../shared/types';
 import { RawGameEvent } from '../../games/GameAdapter';
@@ -10,6 +12,8 @@ import { parseReplay, ParsedReplay } from './ReplayParser';
 import { createLogger } from '../../logging/Logger';
 
 const log = createLogger('R6Replay');
+
+const execFileAsync = promisify(execFile);
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -63,15 +67,33 @@ export class R6ReplayProvider extends EventEmitter {
   private sessionStartMs = 0;
   private options: R6ReplayOptions = { roundOffsetMs: 0 };
   private replayRoots: string[] = [];
+  /** El aviso de "no hay repeticiones" se da una vez por sesion, no cada 5 s. */
+  private warnedMissing = false;
   private readonly documentsDir?: string;
+  private readonly installFolders?: string[];
 
   /**
-   * `documentsDir` solo se usa en los tests, para apuntar a una carpeta de
-   * repeticiones sintetica en lugar de a la del usuario.
+   * `documentsDir` e `installFolders` solo se usan en los tests, para apuntar a
+   * carpetas sinteticas en lugar de a las del usuario. Dar `installFolders`
+   * (aunque sea vacio) evita ademas preguntarle a Windows por el juego en
+   * marcha, que en un test daria una respuesta distinta en cada maquina.
    */
-  constructor(documentsDir?: string) {
+  constructor(documentsDir?: string, installFolders?: string[]) {
     super();
     this.documentsDir = documentsDir;
+    this.installFolders = installFolders;
+  }
+
+  /** Todas las carpetas de repeticiones, mirando en los dos sitios posibles. */
+  private async resolveRoots(): Promise<string[]> {
+    if (this.installFolders) {
+      const roots = findReplayRoots(this.documentsDir);
+      for (const root of findInstallReplayRoots(this.installFolders)) {
+        if (!roots.includes(root)) roots.push(root);
+      }
+      return roots;
+    }
+    return resolveReplayRoots(this.documentsDir);
   }
 
   getState(): ProviderState {
@@ -89,7 +111,10 @@ export class R6ReplayProvider extends EventEmitter {
   start(sessionStartMs: number, options?: R6ReplayOptions): void {
     if (options) this.options = options;
     this.sessionStartMs = sessionStartMs;
+    this.warnedMissing = false;
     this.processed.clear();
+    // Lo sincrono primero, para no retrasar el arranque. La busqueda completa
+    // (que incluye preguntar por el ejecutable en marcha) la hace el sondeo.
     this.replayRoots = findReplayRoots(this.documentsDir);
 
     if (this.replayRoots.length === 0) {
@@ -100,17 +125,10 @@ export class R6ReplayProvider extends EventEmitter {
       // caso, y rendirse aqui dejaba sin marcadores toda la sesion: la primera
       // partida despues de activarlo era justo la que no se enteraba. Asi que
       // se sigue mirando, y en cuanto aparezca la carpeta se empieza a leer.
-      this.setState({
-        status: 'unavailable',
-        provider: 'r6-replay',
-        message:
-          'No se ha encontrado la carpeta de repeticiones de Rainbow Six Siege. ' +
-          'Activa la funcion Match Replay en las opciones del juego para tener marcadores.',
-      });
-      log.warn(
-        'Sin carpeta de repeticiones todavia; se seguira comprobando por si aparece ' +
-          'al terminar la primera partida',
-      );
+      // Sin mensaje: la ventana solo avisa cuando hay algo que decir, y de
+      // momento lo unico cierto es que todavia no se ha terminado de buscar.
+      this.setState({ status: 'unavailable', provider: 'r6-replay' });
+      log.info('Buscando la carpeta de repeticiones de Rainbow Six');
     } else {
       log.info(`Vigilando repeticiones en: ${this.replayRoots.join(', ')}`);
       this.announceConnected();
@@ -118,6 +136,27 @@ export class R6ReplayProvider extends EventEmitter {
 
     if (this.timer) return;
     this.timer = setInterval(() => void this.scan(), POLL_INTERVAL_MS);
+  }
+
+  /**
+   * Avisa una sola vez de que no hay repeticiones en ninguna parte.
+   *
+   * Se dice despues de mirar de verdad en todos los sitios, no al detectar el
+   * juego: decirlo antes de haber buscado en la carpeta del juego era acusar a
+   * la opcion de estar apagada cuando llevaba toda la tarde funcionando.
+   */
+  private warnMissingOnce(): void {
+    if (this.warnedMissing) return;
+    this.warnedMissing = true;
+    log.warn('No se ha encontrado ninguna carpeta de repeticiones de Rainbow Six');
+    this.setState({
+      status: 'unavailable',
+      provider: 'r6-replay',
+      message:
+        'No se han encontrado las repeticiones de Rainbow Six Siege, ni en Documentos ' +
+        'ni en la carpeta del juego. Activa la funcion Match Replay en las opciones ' +
+        'del juego para tener marcadores.',
+    });
   }
 
   private announceConnected(): void {
@@ -159,8 +198,11 @@ export class R6ReplayProvider extends EventEmitter {
       // La carpeta puede aparecer a mitad de sesion: es lo que pasa la primera
       // vez, cuando el juego guarda la repeticion de la primera partida.
       if (this.replayRoots.length === 0) {
-        this.replayRoots = findReplayRoots(this.documentsDir);
-        if (this.replayRoots.length === 0) return;
+        this.replayRoots = await this.resolveRoots();
+        if (this.replayRoots.length === 0) {
+          this.warnMissingOnce();
+          return;
+        }
         log.info(`Carpeta de repeticiones encontrada: ${this.replayRoots.join(', ')}`);
         this.announceConnected();
       }
@@ -393,11 +435,19 @@ export function absoluteTimeFor(anchor: RoundAnchor, timeRemaining: number): num
 }
 
 /**
- * Localiza las carpetas de repeticiones.
+ * Nombre de la carpeta que Siege usa para las repeticiones, alla donde este.
+ */
+const REPLAY_FOLDER = 'MatchReplay';
+
+/**
+ * Localiza las carpetas de repeticiones bajo Documentos.
  *
  * Siege guarda un directorio por perfil bajo
  * `Documentos\My Games\Rainbow Six - Siege\<perfil>\MatchReplay`.
  * Puede haber varios perfiles, asi que se devuelven todos los existentes.
+ *
+ * Ojo: esta no es la unica ubicacion, ni la habitual hoy. Ver
+ * `findInstallReplayRoots`.
  */
 export function findReplayRoots(documentsDir?: string): string[] {
   const documents = documentsDir ?? safeDocumentsPath();
@@ -411,11 +461,93 @@ export function findReplayRoots(documentsDir?: string): string[] {
     const { readdirSync } = require('node:fs') as typeof import('node:fs');
     for (const entry of readdirSync(base, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
-      const candidate = join(base, entry.name, 'MatchReplay');
+      const candidate = join(base, entry.name, REPLAY_FOLDER);
       if (existsSync(candidate)) roots.push(candidate);
     }
   } catch {
     return [];
+  }
+  return roots;
+}
+
+/**
+ * Localiza las repeticiones dentro de la propia instalacion del juego.
+ *
+ * Aqui es donde estan de verdad. Siege escribe
+ * `<carpeta del juego>\MatchReplay\Match-<fecha>-<id>\...-R01.rec`, una
+ * carpeta por partida y un fichero por ronda, y no toca Documentos para nada.
+ * Buscar solo en Documentos era buscar donde no hay nada: la aplicacion decia
+ * que Match Replay estaba desactivado mientras el juego llevaba toda la tarde
+ * guardando repeticiones a cinco carpetas de distancia.
+ *
+ * Se comprueban las carpetas que se pasen (normalmente la del ejecutable en
+ * marcha, que vale para cualquier disco y cualquier tienda) y se devuelven las
+ * que ya tienen la carpeta creada.
+ */
+export function findInstallReplayRoots(gameFolders: string[]): string[] {
+  const roots: string[] = [];
+  for (const folder of gameFolders) {
+    if (!folder) continue;
+    const candidate = join(folder, REPLAY_FOLDER);
+    if (existsSync(candidate) && !roots.includes(candidate)) roots.push(candidate);
+  }
+  return roots;
+}
+
+/**
+ * Sitios donde suele instalarse Siege, para cuando no se sabe la ruta real.
+ *
+ * Es el respaldo, no el metodo: lo bueno es preguntar por el ejecutable que
+ * esta corriendo, que acierta aunque el juego este en otro disco. Esto cubre
+ * el caso de que esa consulta falle.
+ */
+export function defaultInstallFolders(env: NodeJS.ProcessEnv = process.env): string[] {
+  const nombre = "Tom Clancy's Rainbow Six Siege";
+  const folders: string[] = [];
+  for (const base of [env['ProgramFiles(x86)'], env.ProgramFiles]) {
+    if (!base) continue;
+    folders.push(join(base, 'Ubisoft', 'Ubisoft Game Launcher', 'games', nombre));
+    folders.push(join(base, 'Steam', 'steamapps', 'common', nombre));
+  }
+  return folders;
+}
+
+/**
+ * Carpeta del ejecutable de Siege que este corriendo ahora mismo.
+ *
+ * Solo pregunta a Windows por la ruta de un proceso, que es lo mismo que
+ * muestra el Administrador de tareas. No abre el proceso, no lee su memoria y
+ * no interactua con el.
+ */
+async function runningGameFolders(): Promise<string[]> {
+  if (process.platform !== 'win32') return [];
+  const script =
+    '@(Get-Process -Name RainbowSix -ErrorAction SilentlyContinue | ' +
+    'Select-Object -ExpandProperty Path) -join [char]10';
+  try {
+    const { stdout } = await execFileAsync(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      { windowsHide: true, timeout: 8000, maxBuffer: 256 * 1024 },
+    );
+    return stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((exe) => dirname(exe));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Todas las carpetas de repeticiones que existen ahora mismo, mire donde mire.
+ */
+export async function resolveReplayRoots(documentsDir?: string): Promise<string[]> {
+  const roots = findReplayRoots(documentsDir);
+  const folders = [...(await runningGameFolders()), ...defaultInstallFolders()];
+  for (const root of findInstallReplayRoots(folders)) {
+    if (!roots.includes(root)) roots.push(root);
   }
   return roots;
 }

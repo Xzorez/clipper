@@ -12,6 +12,8 @@ import {
   R6ReplayProvider,
   collectReplayFiles,
   findReplayRoots,
+  findInstallReplayRoots,
+  defaultInstallFolders,
   computeRoundAnchor,
   absoluteTimeFor,
 } from '../src/core/providers/r6/R6ReplayProvider';
@@ -367,6 +369,83 @@ describe('R6ReplayProvider', () => {
     rmSync(empty, { recursive: true, force: true });
   });
 
+  /**
+   * Donde estan las repeticiones de verdad.
+   *
+   * Siege no usa Documentos: escribe dentro de su propia instalacion, en
+   * `<carpeta del juego>/MatchReplay/Match-<fecha>-<id>/...-R01.rec`. Mirar
+   * solo en Documentos hacia que la aplicacion diese por desactivado un Match
+   * Replay que llevaba toda la tarde guardando partidas.
+   */
+  describe('repeticiones en la carpeta del juego', () => {
+    let juego: string;
+
+    beforeEach(() => {
+      juego = mkdtempSync(join(tmpdir(), 'clipper-r6-juego-'));
+    });
+
+    afterEach(() => {
+      rmSync(juego, { recursive: true, force: true });
+    });
+
+    it('encuentra la carpeta dentro de la instalacion', () => {
+      mkdirSync(join(juego, 'MatchReplay'), { recursive: true });
+      expect(findInstallReplayRoots([juego])).toEqual([join(juego, 'MatchReplay')]);
+    });
+
+    it('ignora una instalacion que todavia no ha guardado ninguna', () => {
+      expect(findInstallReplayRoots([juego])).toEqual([]);
+    });
+
+    it('no repite una carpeta que aparezca dos veces', () => {
+      mkdirSync(join(juego, 'MatchReplay'), { recursive: true });
+      expect(findInstallReplayRoots([juego, juego])).toHaveLength(1);
+    });
+
+    it('mira donde Ubisoft y Steam instalan el juego', () => {
+      const folders = defaultInstallFolders({
+        'ProgramFiles(x86)': 'C:/PF86',
+        ProgramFiles: 'C:/PF',
+      } as NodeJS.ProcessEnv);
+
+        const texto = folders.join('|').replace(new RegExp('\\\\', 'g'), '/');
+      expect(texto).toContain('C:/PF86/Ubisoft/Ubisoft Game Launcher/games');
+      expect(texto).toContain('steamapps/common');
+      expect(folders.every((f) => f.includes("Tom Clancy's Rainbow Six Siege"))).toBe(true);
+    });
+
+    it('lee una partida con la estructura real del juego', async () => {
+      // Tal cual la escribe Siege: una carpeta por partida con el instante de
+      // inicio en el nombre, y un fichero por ronda dentro.
+      const partida = join(juego, 'MatchReplay', 'Match-2026-09-06_20-05-40-19148');
+      mkdirSync(partida, { recursive: true });
+      const ronda = join(partida, 'Match-2026-09-06_20-05-40-19148-R01.rec');
+      writeFileSync(
+        ronda,
+        buildReplayFile(HEADER, [
+          { kind: 'time', secondsRemaining: 180 },
+          { kind: 'kill', killer: ME, victim: 'Enemigo', headshot: true },
+        ]),
+      );
+      const cuando = new Date(Date.now() - 10_000);
+      utimesSync(ronda, cuando, cuando);
+
+      const vacio = mkdtempSync(join(tmpdir(), 'clipper-r6-docs-'));
+      const provider = new R6ReplayProvider(vacio, [juego]);
+      const received: RawGameEvent[] = [];
+      provider.on('raw', (raw: RawGameEvent) => received.push(raw));
+
+      provider.start(0);
+      await provider.scan();
+
+      expect(provider.getState().status).toBe('connected');
+      expect(received.map((raw) => raw.key)).toContain('kill');
+
+      provider.dispose();
+      rmSync(vacio, { recursive: true, force: true });
+    });
+  });
+
   it('recoge los .rec incluidos los de subcarpetas por partida', async () => {
     const sub = join(replayDir, 'Match-2026-09-02');
     mkdirSync(sub, { recursive: true });
@@ -379,14 +458,21 @@ describe('R6ReplayProvider', () => {
     expect(files.every((f) => f.path.endsWith('.rec'))).toBe(true);
   });
 
-  it('avisa cuando no hay carpeta de repeticiones', () => {
+  it('avisa cuando no hay repeticiones en ningun sitio', async () => {
     const empty = mkdtempSync(join(tmpdir(), 'clipper-r6-sin-'));
-    const provider = new R6ReplayProvider(empty);
+    const provider = new R6ReplayProvider(empty, []);
     provider.start(Date.now());
+
+    // Nada mas detectar el juego no se acusa a nadie: todavia no se ha mirado
+    // en la carpeta del juego, que es donde suelen estar.
+    expect(provider.getState().message).toBeUndefined();
+
+    await provider.scan();
 
     const state = provider.getState();
     expect(state.status).toBe('unavailable');
     expect(state.message).toContain('Match Replay');
+    expect(state.message).toContain('carpeta del juego');
 
     provider.dispose();
     rmSync(empty, { recursive: true, force: true });
@@ -399,7 +485,7 @@ describe('R6ReplayProvider', () => {
     // estaba, asi que la primera partida despues de activarlo era justo la que
     // se quedaba sin marcadores.
     const tarde = mkdtempSync(join(tmpdir(), 'clipper-r6-tarde-'));
-    const provider = new R6ReplayProvider(tarde);
+    const provider = new R6ReplayProvider(tarde, []);
     const received: RawGameEvent[] = [];
     provider.on('raw', (raw: RawGameEvent) => received.push(raw));
 
