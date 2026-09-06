@@ -67,7 +67,6 @@
     ],
     "extraResources": [
       {
-        "comment": "El capturador de sonido del sistema. Fuera del asar porque un ejecutable no se puede lanzar desde dentro del archivo.",
         "from": "resources/native",
         "to": "native"
       }
