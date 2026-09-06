@@ -24,7 +24,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
-    "build:native": "cmd /c scripts\build-native.bat",
+    "build:native": "node scripts/build-native.js",
     "dist": "npm run build:native && npm run build && electron-builder --win --publish never",
     "release": "node scripts/release.js"
   },
